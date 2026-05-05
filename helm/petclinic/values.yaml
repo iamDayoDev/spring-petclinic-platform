@@ -1,0 +1,46 @@
+image:
+  registry: 139561979448.dkr.ecr.us-east-1.amazonaws.com
+  tag: latest
+
+services:
+  config-server:
+    replicaCount: 1
+    port: 8888
+    profile: default
+    mysql: false
+
+  discovery-server:
+    replicaCount: 1
+    port: 8761
+    profile: docker
+    mysql: false
+
+  api-gateway:
+    replicaCount: 1
+    port: 8080
+    profile: docker
+    mysql: false
+
+  customers-service:
+    replicaCount: 1
+    port: 8081
+    profile: docker,mysql
+    mysql: true
+
+  vets-service:
+    replicaCount: 1
+    port: 8083
+    profile: docker,mysql
+    mysql: true
+
+  visits-service:
+    replicaCount: 1
+    port: 8082
+    profile: docker,mysql
+    mysql: true
+
+  admin-server:
+    replicaCount: 1
+    port: 9090
+    profile: docker
+    mysql: false
