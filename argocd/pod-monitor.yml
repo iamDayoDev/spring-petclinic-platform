@@ -1,0 +1,35 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: petclinic-pods
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - petclinic
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: petclinic
+  podMetricsEndpoints:
+  - path: /actuator/prometheus
+    interval: 15s
+EOFcat > argocd/pod-monitor.yml << 'EOF'
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: petclinic-pods
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - petclinic
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: petclinic
+  podMetricsEndpoints:
+  - path: /actuator/prometheus
+    interval: 15s
