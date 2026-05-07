@@ -44,3 +44,11 @@ services:
     port: 9090
     profile: docker
     mysql: false
+
+  genai-service:
+    replicaCount: 1
+    port: 8084
+    profile: docker
+    mysql: false
+    waitForDiscovery: true
+    openaiSecret: true

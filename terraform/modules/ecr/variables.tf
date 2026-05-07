@@ -9,5 +9,6 @@ variable "services" {
     "vets-service",
     "visits-service",
     "admin-server",
+    "genai-service",
   ]
 }

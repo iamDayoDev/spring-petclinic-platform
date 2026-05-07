@@ -29,7 +29,7 @@ spec:
               until wget -qO /dev/null http://config-server:8888/actuator/health 2>/dev/null; do
                 echo "waiting for config-server..."; sleep 3
               done
-        {{- if $svc.mysql }}
+        {{- if or $svc.mysql $svc.waitForDiscovery }}
         - name: wait-for-discovery-server
           image: busybox:1.36
           command:
@@ -85,6 +85,13 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: MYSQL_PASSWORD
+            {{- end }}
+            {{- if $svc.openaiSecret }}
+            - name: SPRING_AI_OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-secret
+                  key: SPRING_AI_OPENAI_API_KEY
             {{- end }}
           readinessProbe:
             httpGet:
