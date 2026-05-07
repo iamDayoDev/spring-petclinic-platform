@@ -17,6 +17,10 @@ spec:
     metadata:
       labels:
         {{- include "petclinic.selectorLabels" (dict "name" $name "release" $root.Release.Name) | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: {{ $svc.port | quote }}
     spec:
       {{- if ne $name "config-server" }}
       initContainers:
