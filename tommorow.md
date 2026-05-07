@@ -1,65 +1,76 @@
-# 🐾 Spring PetClinic - Tomorrow's Deployment Commands
-# Run each stage one after the other - DO NOT skip any stage!
-# Prepared by: Osenat Alonge - DevOps Engineer, DMI Cohort-2
+# 🐾 Spring PetClinic — Tomorrow's Deployment Commands
+**Prepared by:** Osenat Alonge | DMI Cohort-2 | DevOps Engineer
 
-===================================================
-STAGE 1: TERRAFORM - Provision AWS Infrastructure
-===================================================
-EXPLANATION: Terraform creates ALL AWS resources automatically.
-This creates: VPC, EKS cluster, ECR repos, RDS MySQL, IAM roles.
-Takes 15-20 minutes. Open a second terminal for Stage 2 while this runs.
+> Run each stage **one after the other**. Do NOT skip any stage!
 
+---
+
+## 📋 Stage Order
+```
+STAGE 1  → Terraform (Provision AWS)
+STAGE 2  → CI/CD (GitHub Actions builds images automatically)
+STAGE 3  → External Secrets Operator (ESO)
+STAGE 4  → Fix RDS Security Group
+STAGE 5  → Deploy with Helm Chart
+STAGE 6  → ArgoCD GitOps
+STAGE 7  → ALB Ingress + Route 53 (HTTPS)
+STAGE 8  → Monitoring (Prometheus + Grafana)
+STAGE 9  → End of Day Cleanup
+```
+
+---
+
+## STAGE 1 — Terraform (Provision AWS Infrastructure)
+
+> Creates everything on AWS: VPC, EKS cluster, ECR repos, RDS MySQL, IAM roles. Takes 15-20 minutes.
+
+```bash
 cd ~/petclinic-platform/terraform
 terraform apply -auto-approve
+```
 
----------------------------------------------
 When done, connect kubectl to the new cluster:
----------------------------------------------
+
+```bash
 aws eks update-kubeconfig --region us-east-1 --name petclinic-eks
 kubectl get nodes
-# Both nodes should show: Ready
+```
 
+✅ Both nodes should show: `Ready`
 
-===================================================
-STAGE 2: CI/CD - GitHub Actions Builds the Images
-===================================================
-EXPLANATION: Instead of manually building images, we push code to GitHub.
-GitHub Actions pipeline automatically:
-  - Builds all 8 Docker images
-  - Pushes them to ECR
-  - Updates values.yaml with new image tag
-  - ArgoCD will deploy the new images automatically
+---
 
----------------------------------------------
-First verify GitHub Secrets are set at:
-github.com/etaoko333/spring-petclinic-microservices
-→ Settings → Secrets → Actions
----------------------------------------------
-Secrets needed:
-  AWS_ACCESS_KEY_ID
-  AWS_SECRET_ACCESS_KEY
-  AWS_REGION          = us-east-1
-  AWS_ACCOUNT_ID      = 139561979448
-  PLATFORM_REPO_PAT   = your GitHub token
+## STAGE 2 — CI/CD (GitHub Actions Builds & Pushes Images)
 
----------------------------------------------
+> Instead of manually building Docker images, we push code to GitHub. The pipeline automatically builds all 8 images, pushes them to ECR, and updates the Helm values.yaml.
+
+First verify these 5 secrets exist at:
+`github.com/etaoko333/spring-petclinic-microservices → Settings → Secrets → Actions`
+
+```
+AWS_ACCESS_KEY_ID      → your AWS access key
+AWS_SECRET_ACCESS_KEY  → your AWS secret key
+AWS_REGION             → us-east-1
+AWS_ACCOUNT_ID         → 139561979448
+PLATFORM_REPO_PAT      → your GitHub personal access token
+```
+
 Trigger the pipeline with a git push:
----------------------------------------------
+
+```bash
 cd ~/spring-petclinic-microservices
 sudo service docker start
 echo "# rebuild $(date)" >> README.md
 git add .
 git commit -m "ci: trigger pipeline to build and push images"
 git push origin main
+```
 
----------------------------------------------
-Watch pipeline at:
-github.com/etaoko333/spring-petclinic-microservices/actions
----------------------------------------------
+Watch pipeline at: `github.com/etaoko333/spring-petclinic-microservices/actions`
 
----------------------------------------------
-When pipeline finishes, verify images in ECR:
----------------------------------------------
+When pipeline finishes, verify all 8 images are in ECR:
+
+```bash
 for SERVICE in config-server discovery-server api-gateway \
   customers-service vets-service visits-service admin-server genai-service; do
   COUNT=$(aws ecr describe-images \
@@ -69,19 +80,19 @@ for SERVICE in config-server discovery-server api-gateway \
     --output text 2>/dev/null)
   echo "$SERVICE: $COUNT image(s)"
 done
-# All 8 should show: 1 image(s)
+```
 
+✅ All 8 should show: `1 image(s)`
 
-===================================================
-STAGE 3: EXTERNAL SECRETS OPERATOR (ESO)
-===================================================
-EXPLANATION: ESO reads DB credentials from AWS Secrets Manager
-and creates a Kubernetes Secret that pods can use.
-This means passwords are NEVER hardcoded in YAML files.
+---
 
----------------------------------------------
-Step 3a - Install ESO:
----------------------------------------------
+## STAGE 3 — External Secrets Operator (ESO)
+
+> ESO reads DB credentials from AWS Secrets Manager and creates a Kubernetes Secret. Passwords are NEVER hardcoded in YAML files.
+
+### Step 3a — Install ESO
+
+```bash
 helm repo add external-secrets https://charts.external-secrets.io
 helm repo update
 
@@ -93,13 +104,15 @@ helm install external-secrets \
   --wait
 
 kubectl get pods -n external-secrets
-# All 3 pods should show: Running
+```
 
----------------------------------------------
-Step 3b - Update OIDC trust policy for ESO:
-IMPORTANT: OIDC URL changes every time EKS is recreated!
-Always run this after new EKS cluster.
----------------------------------------------
+✅ All 3 pods should show: `Running`
+
+### Step 3b — Update OIDC Trust Policy for ESO
+
+> ⚠️ IMPORTANT: The OIDC URL changes every time EKS is recreated. You MUST run this every time!
+
+```bash
 export OIDC_PROVIDER=$(aws eks describe-cluster \
   --name petclinic-eks \
   --region us-east-1 \
@@ -126,10 +139,11 @@ aws iam update-assume-role-policy \
       }
     }]
   }"
+```
 
----------------------------------------------
-Step 3c - Create namespace and annotate service account:
----------------------------------------------
+### Step 3c — Create Namespace and Annotate Service Account
+
+```bash
 kubectl create namespace petclinic
 
 kubectl annotate serviceaccount external-secrets \
@@ -140,33 +154,35 @@ kubectl annotate serviceaccount external-secrets \
 kubectl rollout restart deployment/external-secrets -n external-secrets
 sleep 25
 kubectl get pods -n external-secrets
+```
 
----------------------------------------------
-Step 3d - Apply SecretStore and ExternalSecret:
----------------------------------------------
+### Step 3d — Apply SecretStore and ExternalSecret
+
+```bash
 kubectl apply -f ~/petclinic-platform/argocd/secret-store.yml
 sleep 10
-
 kubectl get clustersecretstore
-# Should show: STATUS=Valid, READY=True
+```
 
+✅ Should show: `STATUS=Valid` `READY=True`
+
+```bash
 kubectl apply -f ~/petclinic-platform/argocd/external-secret.yml
 sleep 15
-
 kubectl get externalsecret -n petclinic
-# Should show: STATUS=SecretSynced, READY=True
-
 kubectl get secret mysql-secret -n petclinic
-# Should show: TYPE=Opaque, DATA=4
+```
 
+✅ ExternalSecret should show: `SecretSynced = True`
+✅ mysql-secret should show: `DATA = 4`
 
-===================================================
-STAGE 4: FIX RDS SECURITY GROUP
-===================================================
-EXPLANATION: RDS MySQL is in a security group that blocks
-connections by default. We must allow EKS pods to connect
-on port 3306 (MySQL port).
+---
 
+## STAGE 4 — Fix RDS Security Group
+
+> RDS MySQL blocks all connections by default. We open port 3306 so EKS pods can connect to the database.
+
+```bash
 EKS_NODE_SG=$(aws eks describe-cluster \
   --name petclinic-eks \
   --region us-east-1 \
@@ -178,8 +194,8 @@ RDS_SG=$(aws rds describe-db-instances \
   --query 'DBInstances[0].VpcSecurityGroups[0].VpcSecurityGroupId' \
   --output text)
 
-echo "EKS Security Group: $EKS_NODE_SG"
-echo "RDS Security Group: $RDS_SG"
+echo "EKS SG: $EKS_NODE_SG"
+echo "RDS SG: $RDS_SG"
 
 aws ec2 authorize-security-group-ingress \
   --group-id $RDS_SG \
@@ -188,66 +204,69 @@ aws ec2 authorize-security-group-ingress \
   --source-group $EKS_NODE_SG \
   --region us-east-1
 
-echo "RDS security group updated - EKS pods can now connect to MySQL"
+echo "RDS security group updated"
+```
 
+---
 
-===================================================
-STAGE 5: DEPLOY WITH HELM CHART
-===================================================
-EXPLANATION: Helm deploys all 8 microservices to EKS.
-The chart uses the images that GitHub Actions pushed to ECR.
-InitContainers ensure services start in the correct order.
+## STAGE 5 — Deploy with Helm Chart
 
----------------------------------------------
-Step 5a - Create OpenAI secret for AI chatbot:
----------------------------------------------
+> Helm deploys all 8 microservices to EKS using the images GitHub Actions pushed to ECR. InitContainers ensure services start in the correct order.
+
+### Step 5a — Create OpenAI Secret for AI Chatbot
+
+```bash
 kubectl create secret generic openai-secret \
   --namespace petclinic \
-  --from-literal=SPRING_AI_OPENAI_API_KEY=(your-key)
+  --from-literal=SPRING_AI_OPENAI_API_KEY=YOUR_OPENAI_KEY_HERE
+```
 
----------------------------------------------
-Step 5b - Deploy the Helm chart:
----------------------------------------------
+### Step 5b — Deploy the Helm Chart
+
+```bash
 cd ~/petclinic-platform
 
 helm install petclinic helm/petclinic/ \
   --namespace petclinic \
   --set image.registry=139561979448.dkr.ecr.us-east-1.amazonaws.com \
   --set image.tag=latest
+```
 
----------------------------------------------
-Step 5c - Watch pods come up (takes 3-5 minutes):
----------------------------------------------
+### Step 5c — Watch Pods Come Up (3-5 minutes)
+
+```bash
 kubectl get pods -n petclinic -w
+```
 
-# Expected final state - ALL 8 pods showing 1/1 Running:
-# admin-server-xxx        1/1     Running
-# api-gateway-xxx         1/1     Running
-# config-server-xxx       1/1     Running
-# customers-service-xxx   1/1     Running
-# discovery-server-xxx    1/1     Running
-# genai-service-xxx       1/1     Running
-# vets-service-xxx        1/1     Running
-# visits-service-xxx      1/1     Running
+✅ Expected — ALL 8 pods showing `1/1 Running`:
+```
+admin-server-xxx        1/1     Running
+api-gateway-xxx         1/1     Running
+config-server-xxx       1/1     Running
+customers-service-xxx   1/1     Running
+discovery-server-xxx    1/1     Running
+genai-service-xxx       1/1     Running
+vets-service-xxx        1/1     Running
+visits-service-xxx      1/1     Running
+```
 
----------------------------------------------
-Step 5d - Get the app URL:
----------------------------------------------
+### Step 5d — Get the App URL
+
+```bash
 kubectl get svc api-gateway -n petclinic
-# Copy EXTERNAL-IP and open in browser
+```
 
+Copy the `EXTERNAL-IP` and open in browser.
 
-===================================================
-STAGE 6: ARGOCD - GitOps Continuous Deployment
-===================================================
-EXPLANATION: ArgoCD watches the petclinic-platform GitHub repo.
-When GitHub Actions updates the image tag in values.yaml,
-ArgoCD automatically redeploys the new version on EKS.
-No manual kubectl apply needed for future deployments!
+---
 
----------------------------------------------
-Step 6a - Install ArgoCD:
----------------------------------------------
+## STAGE 6 — ArgoCD GitOps
+
+> ArgoCD watches the petclinic-platform GitHub repo. When GitHub Actions updates the image tag, ArgoCD automatically redeploys on EKS. No manual kubectl apply needed for future deployments!
+
+### Step 6a — Install ArgoCD
+
+```bash
 kubectl create namespace argocd
 
 kubectl apply -n argocd -f \
@@ -255,43 +274,43 @@ kubectl apply -n argocd -f \
 
 kubectl wait --for=condition=available deployment/argocd-server \
   -n argocd --timeout=300s
+```
 
----------------------------------------------
-Step 6b - Expose ArgoCD UI:
----------------------------------------------
+### Step 6b — Expose ArgoCD UI and Get Password
+
+```bash
 kubectl patch svc argocd-server -n argocd \
   -p '{"spec": {"type": "LoadBalancer"}}'
 
 kubectl get svc argocd-server -n argocd
-# Copy EXTERNAL-IP for ArgoCD UI
 
 kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" | base64 -d && echo
-# Copy this password
+```
 
----------------------------------------------
-Step 6c - Connect ArgoCD to platform repo:
----------------------------------------------
+Copy the URL and password. Open in browser:
+- **Username:** `admin`
+- **Password:** from command above
+
+### Step 6c — Connect ArgoCD to Platform Repo
+
+```bash
 kubectl apply -f ~/petclinic-platform/argocd/application.yml
 
 kubectl get application petclinic -n argocd
-# Should show: SYNC STATUS=Synced, HEALTH STATUS=Healthy
+```
 
-# Open ArgoCD UI: http://EXTERNAL-IP
-# Username: admin
-# Password: from command above
+✅ Should show: `SYNC STATUS=Synced` `HEALTH STATUS=Healthy`
 
+---
 
-===================================================
-STAGE 7: ALB INGRESS + ROUTE 53 (HTTPS)
-===================================================
-EXPLANATION: AWS Load Balancer Controller creates an ALB
-from our Ingress manifest. Route 53 points eta-oko.com to the ALB.
-ACM certificate provides HTTPS encryption.
+## STAGE 7 — ALB Ingress + Route 53 (HTTPS)
 
----------------------------------------------
-Step 7a - Install AWS Load Balancer Controller:
----------------------------------------------
+> ALB Controller creates an AWS Load Balancer from the Ingress manifest. Route 53 points eta-oko.com to the ALB. ACM certificate handles HTTPS.
+
+### Step 7a — Install AWS Load Balancer Controller
+
+```bash
 VPC_ID=$(aws ec2 describe-vpcs \
   --filters "Name=tag:Name,Values=petclinic-vpc" \
   --query 'Vpcs[0].VpcId' --output text --region us-east-1)
@@ -310,11 +329,13 @@ helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
   --set vpcId=$VPC_ID
 
 kubectl get pods -n kube-system | grep aws-load-balancer
+```
 
----------------------------------------------
-Step 7b - Update ALB role OIDC trust policy:
-IMPORTANT: OIDC changes every time! Must update.
----------------------------------------------
+### Step 7b — Update ALB Role OIDC Trust Policy
+
+> ⚠️ IMPORTANT: OIDC changes every time EKS is recreated. Must update every time!
+
+```bash
 aws iam update-assume-role-policy \
   --role-name petclinic-alb-role \
   --policy-document "{
@@ -341,20 +362,23 @@ kubectl annotate serviceaccount aws-load-balancer-controller \
 kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
 sleep 20
 kubectl get pods -n kube-system | grep aws-load-balancer
-# Both pods should show: Running
+```
 
----------------------------------------------
-Step 7c - Apply Ingress (creates the ALB):
----------------------------------------------
+✅ Both pods should show: `Running`
+
+### Step 7c — Apply Ingress
+
+```bash
 kubectl apply -f ~/petclinic-platform/argocd/ingress.yml
 
-# Wait 2-3 minutes for ALB to be provisioned
 watch -n 15 'kubectl get ingress petclinic-ingress -n petclinic'
-# Wait until ADDRESS column shows the ALB hostname
+```
 
----------------------------------------------
-Step 7d - Update Route 53 to point to ALB:
----------------------------------------------
+Wait until `ADDRESS` column shows the ALB hostname.
+
+### Step 7d — Update Route 53
+
+```bash
 ALB_HOST=$(kubectl get ingress petclinic-ingress -n petclinic \
   -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
@@ -376,23 +400,25 @@ aws route53 change-resource-record-sets \
       }
     }]
   }"
+```
 
-# Wait 2-5 minutes then test:
+Wait 2-5 minutes then test:
+
+```bash
 curl -I https://eta-oko.com
-# Should show: HTTP/1.1 200 OK
+```
 
+✅ Should show: `HTTP/1.1 200 OK`
 
-===================================================
-STAGE 8: MONITORING - Prometheus + Grafana
-===================================================
-EXPLANATION: Prometheus collects metrics from all services.
-Grafana displays them as dashboards.
-Spring PetClinic already has Micrometer built in -
-services automatically expose /actuator/prometheus endpoint.
+---
 
----------------------------------------------
-Step 8a - Scale to 3 nodes (monitoring needs resources):
----------------------------------------------
+## STAGE 8 — Monitoring (Prometheus + Grafana)
+
+> Prometheus collects metrics from services every 15 seconds. Grafana displays them as dashboards. Spring PetClinic services automatically expose `/actuator/prometheus`.
+
+### Step 8a — Scale to 3 Nodes
+
+```bash
 NODEGROUP=$(aws eks list-nodegroups \
   --cluster-name petclinic-eks \
   --region us-east-1 \
@@ -406,13 +432,14 @@ aws eks update-nodegroup-config \
   --scaling-config minSize=1,maxSize=4,desiredSize=3 \
   --region us-east-1
 
-# Wait for 3rd node to join
 watch -n 20 'kubectl get nodes'
-# Wait until 3 nodes show: Ready
+```
 
----------------------------------------------
-Step 8b - Install Prometheus + Grafana:
----------------------------------------------
+Wait until 3 nodes show: `Ready`
+
+### Step 8b — Install Prometheus + Grafana
+
+```bash
 helm repo add prometheus-community \
   https://prometheus-community.github.io/helm-charts
 helm repo update
@@ -425,139 +452,150 @@ helm install monitoring \
   --set grafana.service.type=LoadBalancer \
   --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
 
-# Wait for all pods (2-3 minutes)
 kubectl get pods -n monitoring
+```
 
----------------------------------------------
-Step 8c - Apply PodMonitor (tells Prometheus what to scrape):
----------------------------------------------
+### Step 8c — Apply PodMonitor
+
+```bash
 kubectl apply -f ~/petclinic-platform/argocd/pod-monitor.yml
 
 kubectl get podmonitor -n monitoring
-# Should show: petclinic-pods
+```
 
----------------------------------------------
-Step 8d - Access Grafana via port-forward:
-NOTE: We use port-forward because LoadBalancer has subnet issues
----------------------------------------------
+✅ Should show: `petclinic-pods`
+
+### Step 8d — Access Grafana
+
+> Use port-forward — Grafana LoadBalancer has subnet tagging issues.
+
+```bash
 pkill -f "port-forward" 2>/dev/null || true
+
 kubectl port-forward svc/monitoring-grafana 3000:80 -n monitoring &
 kubectl port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090 -n monitoring &
+```
 
-echo "Grafana:    http://localhost:3000"
-echo "Login:      admin / petclinic123"
-echo "Prometheus: http://localhost:9090"
+Open in browser:
+- **Grafana:** http://localhost:3000 → `admin / petclinic123`
+- **Prometheus:** http://localhost:9090/targets
 
----------------------------------------------
-Step 8e - Import Spring PetClinic dashboard:
-NOTE: Use local file - avoids internet connectivity issues
----------------------------------------------
+### Step 8e — Import Spring PetClinic Dashboard
+
+> Use local file — avoids internet connectivity issues with dashboard ID 4701.
+
+```bash
 cp ~/spring-petclinic-microservices/docker/grafana/dashboards/grafana-petclinic-dashboard.json \
   /tmp/petclinic-dashboard.json
+```
 
-echo "Now in Grafana browser:"
-echo "1. Click Dashboards → Import"
-echo "2. Click Upload dashboard JSON file"
-echo "3. Select /tmp/petclinic-dashboard.json"
-echo "4. Select Prometheus as data source"
-echo "5. Click Import"
+In Grafana browser:
+1. Click **Dashboards → Import**
+2. Click **Upload dashboard JSON file**
+3. Select `/tmp/petclinic-dashboard.json`
+4. Select **Prometheus** as data source
+5. Click **Import**
 
----------------------------------------------
-Step 8f - Verify Prometheus is scraping:
-Open: http://localhost:9090/targets
----------------------------------------------
-# Expected: 5/8 petclinic services showing UP
-# customers-service, vets-service, visits-service,
-# api-gateway, genai-service = UP
-# admin-server, config-server, discovery-server = DOWN
-# (they don't have Micrometer Prometheus dependency)
+✅ You will see: HTTP Request Latency, HTTP Request Activity, SPC Business Histogram
 
+### Step 8f — Verify Prometheus Targets
 
-===================================================
-VERIFICATION - Check everything is working
-===================================================
+Open: `http://localhost:9090/targets`
 
-# Check all pods are running
+```
+✅ customers-service   UP
+✅ vets-service        UP
+✅ visits-service      UP
+✅ api-gateway         UP
+✅ genai-service       UP
+❌ admin-server        DOWN (no Micrometer dependency in code)
+❌ config-server       DOWN (no Micrometer dependency in code)
+❌ discovery-server    DOWN (no Micrometer dependency in code)
+```
+
+---
+
+## ✅ Verification — Check Everything is Working
+
+```bash
 kubectl get pods -n petclinic
 kubectl get pods -n argocd
 kubectl get pods -n monitoring
 kubectl get pods -n external-secrets
-
-# Check ArgoCD is synced
 kubectl get application petclinic -n argocd
-
-# Check secret is synced
 kubectl get secret mysql-secret -n petclinic
+```
 
-# Test the app
-curl -I https://eta-oko.com
+Open in browser:
+```
+https://eta-oko.com           → Main app + AI chatbot
+http://localhost:3000         → Grafana dashboards
+http://localhost:9090/targets → Prometheus targets
+```
 
-# Open in browser:
-# https://eta-oko.com              - Main app
-# http://localhost:3000            - Grafana
-# http://localhost:9090/targets    - Prometheus targets
-# ArgoCD UI from Stage 6
+---
 
+## STAGE 9 — End of Day Cleanup ⚠️ EVERY DAY!
 
-===================================================
-STAGE 9: END OF DAY CLEANUP - RUN EVERY DAY!
-===================================================
-EXPLANATION: EKS + RDS costs money every hour.
-One command destroys everything and stops all charges.
-Tomorrow we just run terraform apply again to rebuild.
+> EKS + RDS costs money every hour. Run this before sleeping every single day!
 
+```bash
 cd ~/petclinic-platform/terraform
 terraform destroy -auto-approve
+```
 
-# Verify everything deleted:
+Verify everything is deleted:
+
+```bash
 aws eks list-clusters --region us-east-1
-# Expected: { "clusters": [] }
-
 aws rds describe-db-instances --region us-east-1 \
   --query 'DBInstances[].DBInstanceStatus' --output text
-# Expected: empty
-
 aws ecr describe-repositories --region us-east-1 \
   --query 'repositories[].repositoryName' --output table
-# Expected: empty
+```
 
+✅ All should return empty.
 
-===================================================
-QUICK REFERENCE - Key Values
-===================================================
+---
 
-AWS Account ID:   139561979448
-AWS Region:       us-east-1
-EKS Cluster:      petclinic-eks
-ECR Registry:     139561979448.dkr.ecr.us-east-1.amazonaws.com
-Domain:           eta-oko.com
-Hosted Zone ID:   Z082555627EV8NAU07JQ4
-ALB Zone ID:      Z35SXDOTRQ7X7K
-ACM Cert ARN:     arn:aws:acm:us-east-1:139561979448:certificate/ff9d81a7-4b2b-4f81-9816-254bc50482cb
-ESO IAM Role:     petclinic-eso-role
-ALB IAM Role:     petclinic-alb-role
-Grafana Login:    admin / petclinic123
-ArgoCD Login:     admin / (get from kubectl command)
-App Repo:         github.com/etaoko333/spring-petclinic-microservices
-Platform Repo:    github.com/etaoko333/petclinic-platform
+## 🔑 Quick Reference Values
 
+```
+AWS Account ID  : 139561979448
+AWS Region      : us-east-1
+EKS Cluster     : petclinic-eks
+ECR Registry    : 139561979448.dkr.ecr.us-east-1.amazonaws.com
+Domain          : eta-oko.com
+Hosted Zone ID  : Z082555627EV8NAU07JQ4
+ALB Zone ID     : Z35SXDOTRQ7X7K
+ACM Cert ARN    : arn:aws:acm:us-east-1:139561979448:certificate/ff9d81a7-4b2b-4f81-9816-254bc50482cb
+ESO IAM Role    : petclinic-eso-role
+ALB IAM Role    : petclinic-alb-role
+Grafana Login   : admin / petclinic123
+ArgoCD Login    : admin / (get from kubectl command in Stage 6b)
+App Repo        : github.com/etaoko333/spring-petclinic-microservices
+Platform Repo   : github.com/etaoko333/petclinic-platform
+```
 
-===================================================
-IMPORTANT REMINDERS
-===================================================
+---
 
-1. OIDC changes every new EKS cluster - always update:
-   - petclinic-eso-role trust policy (Stage 3b)
-   - petclinic-alb-role trust policy (Stage 7b)
+## ⚠️ Important Reminders
 
-2. GitHub Actions builds images - no manual docker commands!
+```
+1. OIDC changes every new EKS cluster:
+   → Update petclinic-eso-role trust policy (Stage 3b)
+   → Update petclinic-alb-role trust policy (Stage 7b)
 
-3. Grafana - use port-forward not LoadBalancer URL
+2. GitHub Actions builds images automatically:
+   → No manual docker build or docker push needed!
 
-4. Import dashboard from local file not dashboard ID 4701
+3. Grafana → use port-forward (not LoadBalancer URL)
+
+4. Import dashboard from local JSON file (not ID 4701)
 
 5. terraform destroy EVERY day before sleeping!
 
-6. If helm install fails try helm upgrade instead
+6. If helm install fails → try helm upgrade instead
 
-7. Deploy stages in exact order - never skip a stage!
+7. Always follow stages in exact order!
+```
