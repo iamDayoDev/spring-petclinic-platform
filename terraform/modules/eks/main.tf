@@ -96,7 +96,7 @@ resource "aws_security_group" "cluster" {
 
 # ─── EKS Cluster ─────────────────────────────────────────────────────────────
 
-resource "aws_eks_cluster" "this" {
+resource "aws_eks_cluster" "petclinic-eks-cluster" {
   name     = var.cluster_name
   version  = var.cluster_version
   role_arn = aws_iam_role.cluster.arn
@@ -116,11 +116,11 @@ resource "aws_eks_cluster" "this" {
 # ─── OIDC Provider (IRSA) ─────────────────────────────────────────────────────
 
 data "tls_certificate" "cluster" {
-  url = aws_eks_cluster.this.identity[0].oidc[0].issuer
+  url = aws_eks_cluster.petclinic-eks-cluster.identity[0].oidc[0].issuer
 }
 
-resource "aws_iam_openid_connect_provider" "this" {
-  url             = aws_eks_cluster.this.identity[0].oidc[0].issuer
+resource "aws_iam_openid_connect_provider" "oidc_provider" {
+  url             = aws_eks_cluster.petclinic-eks-cluster.identity[0].oidc[0].issuer
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = [data.tls_certificate.cluster.certificates[0].sha1_fingerprint]
 
@@ -131,8 +131,8 @@ resource "aws_iam_openid_connect_provider" "this" {
 
 # ─── Managed Node Group ───────────────────────────────────────────────────────
 
-resource "aws_eks_node_group" "this" {
-  cluster_name    = aws_eks_cluster.this.name
+resource "aws_eks_node_group" "petclinic-node-group" {
+  cluster_name    = aws_eks_cluster.petclinic-eks-cluster.name
   node_group_name = "${var.cluster_name}-ng"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = var.subnet_ids
@@ -160,18 +160,18 @@ data "aws_iam_policy_document" "ebs_csi_assume_role" {
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.this.arn]
+      identifiers = [aws_iam_openid_connect_provider.oidc_provider.arn]
     }
 
     condition {
       test     = "StringEquals"
-      variable = "${replace(aws_iam_openid_connect_provider.this.url, "https://", "")}:sub"
+      variable = "${replace(aws_iam_openid_connect_provider.oidc_provider.url, "https://", "")}:sub"
       values   = ["system:serviceaccount:kube-system:ebs-csi-controller-sa"]
     }
 
     condition {
       test     = "StringEquals"
-      variable = "${replace(aws_iam_openid_connect_provider.this.url, "https://", "")}:aud"
+      variable = "${replace(aws_iam_openid_connect_provider.oidc_provider.url, "https://", "")}:aud"
       values   = ["sts.amazonaws.com"]
     }
   }
@@ -194,10 +194,10 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
 # ─── Addons ───────────────────────────────────────────────────────────────────
 
 resource "aws_eks_addon" "coredns" {
-  cluster_name = aws_eks_cluster.this.name
+  cluster_name = aws_eks_cluster.petclinic-eks-cluster.name
   addon_name   = "coredns"
 
-  depends_on = [aws_eks_node_group.this]
+  depends_on = [aws_eks_node_group.petclinic-node-group]
 
   tags = {
     Environment = "production"
@@ -205,10 +205,10 @@ resource "aws_eks_addon" "coredns" {
 }
 
 resource "aws_eks_addon" "kube_proxy" {
-  cluster_name = aws_eks_cluster.this.name
+  cluster_name = aws_eks_cluster.petclinic-eks-cluster.name
   addon_name   = "kube-proxy"
 
-  depends_on = [aws_eks_node_group.this]
+  depends_on = [aws_eks_node_group.petclinic-node-group]
 
   tags = {
     Environment = "production"
@@ -216,17 +216,17 @@ resource "aws_eks_addon" "kube_proxy" {
 }
 
 resource "aws_eks_addon" "ebs_csi_driver" {
-  cluster_name                = aws_eks_cluster.this.name
+  cluster_name                = aws_eks_cluster.petclinic-eks-cluster.name
   addon_name                  = "aws-ebs-csi-driver"
   service_account_role_arn    = aws_iam_role.ebs_csi.arn
   resolve_conflicts_on_create = "OVERWRITE"
 
-  depends_on = [aws_eks_node_group.this, aws_iam_role_policy_attachment.ebs_csi]
+  depends_on = [aws_eks_node_group.petclinic-node-group, aws_iam_role_policy_attachment.ebs_csi]
 
   timeouts {
     create = "30m"
   }
-
+  
   tags = {
     Environment = "production"
   }
