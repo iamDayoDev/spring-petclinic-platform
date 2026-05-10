@@ -73,7 +73,7 @@ resource "aws_db_instance" "petclinic-mysql" {
 # ─── Secrets Manager ─────────────────────────────────────────────────────────
 
 resource "aws_secretsmanager_secret" "db_secret" {
-  name                    = "petclinic/db-credentials"
+  name                    = "petclinic/database-credentials"
   recovery_window_in_days = 0
 
   tags = {

@@ -1,16 +1,16 @@
 output "cluster_name" {
   description = "Name of the EKS cluster"
-  value       = aws_eks_cluster.this.name
+  value       = aws_eks_cluster.petclinic-eks-cluster.name
 }
 
 output "cluster_endpoint" {
   description = "API server endpoint of the EKS cluster"
-  value       = aws_eks_cluster.this.endpoint
+  value       = aws_eks_cluster.petclinic-eks-cluster.endpoint
 }
 
 output "cluster_ca" {
   description = "Base64-encoded certificate authority data for the cluster"
-  value       = aws_eks_cluster.this.certificate_authority[0].data
+  value       = aws_eks_cluster.petclinic-eks-cluster.certificate_authority[0].data
 }
 
 output "node_role_arn" {
@@ -20,5 +20,5 @@ output "node_role_arn" {
 
 output "oidc_provider_arn" {
   description = "ARN of the OIDC identity provider (for IRSA)"
-  value       = aws_iam_openid_connect_provider.this.arn
+  value       = aws_iam_openid_connect_provider.oidc_provider.arn
 }
