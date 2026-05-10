@@ -1,16 +1,3 @@
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.0"
-    }
-  }
-}
-
 # ─── Password ─────────────────────────────────────────────────────────────────
 
 resource "random_password" "db" {
@@ -48,7 +35,7 @@ resource "aws_security_group" "rds" {
 
 # ─── DB Subnet Group ──────────────────────────────────────────────────────────
 
-resource "aws_db_subnet_group" "this" {
+resource "aws_db_subnet_group" "petclinic-db-subnet-group" {
   name       = "petclinic-db-subnet-group"
   subnet_ids = var.subnet_ids
 
@@ -59,7 +46,7 @@ resource "aws_db_subnet_group" "this" {
 
 # ─── RDS Instance ─────────────────────────────────────────────────────────────
 
-resource "aws_db_instance" "this" {
+resource "aws_db_instance" "petclinic-mysql" {
   identifier        = "petclinic-mysql"
   engine            = "mysql"
   engine_version    = "8.0"
@@ -71,7 +58,7 @@ resource "aws_db_instance" "this" {
   username = var.db_username
   password = random_password.db.result
 
-  db_subnet_group_name   = aws_db_subnet_group.this.name
+  db_subnet_group_name   = aws_db_subnet_group.petclinic-db-subnet-group.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
   multi_az            = false
@@ -85,7 +72,7 @@ resource "aws_db_instance" "this" {
 
 # ─── Secrets Manager ─────────────────────────────────────────────────────────
 
-resource "aws_secretsmanager_secret" "db_credentials" {
+resource "aws_secretsmanager_secret" "db_secret" {
   name                    = "petclinic/db-credentials"
   recovery_window_in_days = 0
 
@@ -95,13 +82,13 @@ resource "aws_secretsmanager_secret" "db_credentials" {
 }
 
 resource "aws_secretsmanager_secret_version" "db_credentials" {
-  secret_id = aws_secretsmanager_secret.db_credentials.id
+  secret_id = aws_secretsmanager_secret.db_secret.id
 
   secret_string = jsonencode({
-    username = aws_db_instance.this.username
+    username = aws_db_instance.petclinic-mysql.username
     password = random_password.db.result
-    endpoint = aws_db_instance.this.address
-    port     = aws_db_instance.this.port
-    dbname   = aws_db_instance.this.db_name
+    endpoint = aws_db_instance.petclinic-mysql.address
+    port     = aws_db_instance.petclinic-mysql.port
+    dbname   = aws_db_instance.petclinic-mysql.db_name
   })
 }

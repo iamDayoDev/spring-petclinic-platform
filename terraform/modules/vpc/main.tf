@@ -1,4 +1,4 @@
-resource "aws_vpc" "this" {
+resource "aws_vpc" "petclinic-vpc" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
@@ -9,8 +9,8 @@ resource "aws_vpc" "this" {
   }
 }
 
-resource "aws_internet_gateway" "this" {
-  vpc_id = aws_vpc.this.id
+resource "aws_internet_gateway" "petclinic-igw" {
+  vpc_id = aws_vpc.petclinic-vpc.id
 
   tags = {
     Name        = "${var.vpc_name}-igw"
@@ -21,7 +21,7 @@ resource "aws_internet_gateway" "this" {
 resource "aws_subnet" "public" {
   count = 2
 
-  vpc_id                  = aws_vpc.this.id
+  vpc_id                  = aws_vpc.petclinic-vpc.id
   cidr_block              = var.public_subnet_cidrs[count.index]
   availability_zone       = var.availability_zones[count.index]
   map_public_ip_on_launch = true
@@ -35,11 +35,11 @@ resource "aws_subnet" "public" {
 }
 
 resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.this.id
+  vpc_id = aws_vpc.petclinic-vpc.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.this.id
+    gateway_id = aws_internet_gateway.petclinic-igw.id
   }
 
   tags = {
