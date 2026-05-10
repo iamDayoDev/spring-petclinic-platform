@@ -1,4 +1,4 @@
-resource "aws_ecr_repository" "this" {
+resource "aws_ecr_repository" "ecr_repo" {
   for_each = var.services
 
   name                 = each.key
@@ -17,7 +17,7 @@ resource "aws_ecr_repository" "this" {
 resource "aws_ecr_lifecycle_policy" "this" {
   for_each = var.services
 
-  repository = aws_ecr_repository.this[each.key].name
+  repository = aws_ecr_repository.ecr_repo[each.key].name
 
   policy = jsonencode({
     rules = [

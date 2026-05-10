@@ -1,6 +1,6 @@
 output "vpc_id" {
   description = "ID of the VPC"
-  value       = aws_vpc.this.id
+  value       = aws_vpc.petclinic-vpc.id
 }
 
 output "public_subnet_ids" {
@@ -10,5 +10,5 @@ output "public_subnet_ids" {
 
 output "vpc_cidr" {
   description = "CIDR block of the VPC"
-  value       = aws_vpc.this.cidr_block
+  value       = aws_vpc.petclinic-vpc.cidr_block
 }
