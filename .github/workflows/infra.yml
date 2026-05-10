@@ -57,8 +57,6 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Verify AWS caller identity
-        run: aws sts get-caller-identity
 
       - name: Resolve Terraform action
         id: tf_action
@@ -79,13 +77,13 @@ jobs:
             exit 1
           fi
 
-      - name: Check Terraform formatting
-        working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform fmt -check -recursive
-
       - name: Terraform init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false -backend-config=backend.hcl
+        
+      - name: Check Terraform formatting
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -recursive
 
       - name: Terraform plan
         working-directory: ${{ env.TF_WORKING_DIR }}
