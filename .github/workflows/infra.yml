@@ -82,6 +82,10 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false -backend-config=backend.hcl
 
+      - name: Format Terraform files
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -recursive
+
       - name: Check Terraform formatting
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform fmt -check -recursive
