@@ -1,0 +1,123 @@
+name: Deploy infrastructure
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "terraform/**"
+      - ".github/workflows/infra.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "terraform/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action to run"
+        required: true
+        type: choice
+        default: plan
+        options:
+          - plan
+          - apply
+          - destroy
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_IN_AUTOMATION: true
+  TF_INPUT: false 
+  TF_VERSION: 1.10.5   
+  TF_WORKING_DIR: terraform
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+  
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      - name: Resolve Terraform action
+        id: tf_action
+        shell: bash
+        run: |
+          ACTION="${{ github.event.inputs.action }}"
+          if [ -z "$ACTION" ]; then
+            ACTION="plan"
+          fi
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+
+      - name: Guard manual apply and destroy
+        if: ${{ github.event_name == 'workflow_dispatch' && (steps.tf_action.outputs.action == 'apply' || steps.tf_action.outputs.action == 'destroy') }}
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Apply and destroy are only allowed from the main branch." >&2
+            exit 1
+          fi
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Format Terraform files
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -recursive
+
+      - name: Check Terraform formatting
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -recursive
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        shell: bash
+        run: |
+          if [ "${{ steps.tf_action.outputs.action }}" = "destroy" ]; then
+            terraform plan -destroy -input=false -no-color -lock-timeout=5m -out=tfplan
+          else
+            terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+          fi
+
+      - name: Terraform apply
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.tf_action.outputs.action == 'apply' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Terraform destroy
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.tf_action.outputs.action == 'destroy' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Deploy infrastructure workflow"
+            echo "- Action: \`${{ steps.tf_action.outputs.action }}\`"
+            echo "- Working directory: \`${{ env.TF_WORKING_DIR }}\`"
+            echo "- AWS region: \`${{ env.AWS_REGION }}\`"
+            echo "- Backend config file: \`terraform/backend.hcl\`"
+          } >> "$GITHUB_STEP_SUMMARY"
