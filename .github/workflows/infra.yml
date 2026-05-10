@@ -29,10 +29,6 @@ permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: infra-${{ github.ref }}
-  cancel-in-progress: false
-
 env:
   TF_IN_AUTOMATION: true
   TF_INPUT: false    
@@ -56,10 +52,13 @@ jobs:
           terraform_version: 1.8.5
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6.1.0
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS caller identity
+        run: aws sts get-caller-identity
 
       - name: Resolve Terraform action
         id: tf_action
@@ -86,7 +85,7 @@ jobs:
 
       - name: Terraform init
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform init -input=false -backend-config=backend.hcl -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}"
+        run: terraform init -input=false -backend-config=backend.hcl
 
       - name: Terraform plan
         working-directory: ${{ env.TF_WORKING_DIR }}
