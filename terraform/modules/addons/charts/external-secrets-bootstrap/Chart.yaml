@@ -1,0 +1,6 @@
+apiVersion: v2
+name: external-secrets-bootstrap
+description: Bootstrap resources that depend on the External Secrets CRDs
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

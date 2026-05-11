@@ -28,6 +28,8 @@ Thumbs.db
 # Helm
 *.tgz
 charts/
+!terraform/modules/addons/charts/
+!terraform/modules/addons/charts/**
 
 # Temp files
 /tmp/
