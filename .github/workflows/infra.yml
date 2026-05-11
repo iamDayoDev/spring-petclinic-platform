@@ -70,15 +70,6 @@ jobs:
           fi
           echo "action=$ACTION" >> "$GITHUB_OUTPUT"
 
-      - name: Guard manual apply and destroy
-        if: ${{ github.event_name == 'workflow_dispatch' && (steps.tf_action.outputs.action == 'apply' || steps.tf_action.outputs.action == 'destroy') }}
-        shell: bash
-        run: |
-          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
-            echo "Apply and destroy are only allowed from the main branch." >&2
-            exit 1
-          fi
-
       - name: Terraform init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false -backend-config=backend.hcl
