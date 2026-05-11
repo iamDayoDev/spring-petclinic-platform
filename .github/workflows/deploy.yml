@@ -1,4 +1,4 @@
-name: Deploy Petclinic App
+name: Deploy Petclinic Application
 
 on:
   push:
