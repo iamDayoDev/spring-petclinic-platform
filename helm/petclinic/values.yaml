@@ -23,6 +23,10 @@ externalSecret:
   targetSecretName: mysql-secret
   remoteSecretName: petclinic/database-credentials
 
+monitoring:
+  podMonitor:
+    enabled: true
+
 services:
   config-server:
     replicaCount: 1
