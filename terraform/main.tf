@@ -1,5 +1,4 @@
 locals {
-  app_namespace             = "petclinic"
   eso_namespace             = "external-secrets"
   eso_service_account_name  = "external-secrets"
   alb_namespace             = "kube-system"
@@ -14,9 +13,14 @@ module "vpc" {
 module "eks" {
   source = "./modules/eks"
 
-  cluster_name = var.cluster_name
-  vpc_id       = module.vpc.vpc_id
-  subnet_ids   = module.vpc.public_subnet_ids
+  cluster_name                 = var.cluster_name
+  cluster_admin_principal_arns = var.cluster_admin_principal_arns
+  node_instance_type           = var.node_instance_type
+  node_desired_size            = var.node_desired_size
+  node_min_size                = var.node_min_size
+  node_max_size                = var.node_max_size
+  vpc_id                       = module.vpc.vpc_id
+  subnet_ids                   = module.vpc.public_subnet_ids
 }
 
 module "iam" {
@@ -40,7 +44,7 @@ module "addons" {
 
   aws_region                = var.aws_region
   vpc_id                    = module.vpc.vpc_id
-  app_namespace             = local.app_namespace
+  app_namespace             = var.app_namespace
   cluster_secret_store_name = local.cluster_secret_store_name
   eso_namespace             = local.eso_namespace
   eso_service_account_name  = local.eso_service_account_name
