@@ -1,0 +1,158 @@
+name: Deploy application
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "helm/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional image tag override. Leave blank to use helm/petclinic/values.yaml."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+  CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+  RELEASE_NAME: petclinic
+  APP_NAMESPACE: petclinic
+  DOMAIN_NAME: ${{ vars.DOMAIN_NAME || '' }}
+  ACM_CERTIFICATE_ARN: ${{ vars.ACM_CERTIFICATE_ARN || '' }}
+
+jobs:
+  deploy:
+    name: Deploy to EKS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4.3.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: gha-deploy-${{ github.run_id }}
+          unset-current-credentials: true
+
+      - name: Resolve deploy context
+        id: context
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          else
+            IMAGE_TAG="$(awk '/^  tag: / { print $2; exit }' helm/petclinic/values.yaml)"
+          fi
+
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Validate deploy configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$DOMAIN_NAME" ]; then
+            echo "DOMAIN_NAME repo variable is required when ingress is enabled." >&2
+            exit 1
+          fi
+
+          if [ -z "$ACM_CERTIFICATE_ARN" ]; then
+            echo "ACM_CERTIFICATE_ARN repo variable is required when ingress is enabled." >&2
+            exit 1
+          fi
+
+      - name: Update kubeconfig
+        shell: bash
+        run: |
+          aws eks update-kubeconfig \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Validate cluster prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! kubectl get namespace "$APP_NAMESPACE" >/dev/null 2>&1; then
+            echo "Namespace '$APP_NAMESPACE' does not exist. Bootstrap prerequisites must be provisioned before running deploy.yml." >&2
+            exit 1
+          fi
+
+          if ! kubectl get secret openai-secret --namespace "$APP_NAMESPACE" >/dev/null 2>&1; then
+            echo "Secret '$APP_NAMESPACE/openai-secret' is missing. Application secrets must be provisioned before deployment." >&2
+            exit 1
+          fi
+
+      - name: Lint chart
+        run: helm lint helm/petclinic
+
+      - name: Deploy Helm release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm upgrade --install "$RELEASE_NAME" helm/petclinic \
+            --namespace "$APP_NAMESPACE" \
+            --create-namespace \
+            --wait \
+            --timeout 15m \
+            --set exposure.apiGatewayServiceType=ClusterIP \
+            --set ingress.enabled=true \
+            --set "ingress.host=$DOMAIN_NAME" \
+            --set "ingress.certificateArn=$ACM_CERTIFICATE_ARN" \
+            --set "image.tag=${{ steps.context.outputs.image_tag }}"
+
+      - name: Wait for ingress hostname
+        id: ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for _ in $(seq 1 40); do
+            ALB_HOST="$(kubectl get ingress "${RELEASE_NAME}-ingress" \
+              --namespace "$APP_NAMESPACE" \
+              --output jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+            if [ -n "$ALB_HOST" ]; then
+              echo "alb_host=$ALB_HOST" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "ALB hostname was not assigned within the timeout window." >&2
+          exit 1
+
+      - name: Deployment summary
+        if: always()
+        shell: bash
+        env:
+          INGRESS_HOST: ${{ steps.ingress.outputs.alb_host }}
+        run: |
+          {
+            echo "### Application deployment"
+            echo "- Cluster: \`$CLUSTER_NAME\`"
+            echo "- Namespace: \`$APP_NAMESPACE\`"
+            echo "- Release: \`$RELEASE_NAME\`"
+            echo "- Image tag: \`${{ steps.context.outputs.image_tag }}\`"
+            echo "- Ingress host: \`${INGRESS_HOST:-pending}\`"
+            echo "- App URL: \`https://$DOMAIN_NAME\`"
+            echo "- Infra/bootstrap actions: managed outside this workflow"
+          } >> "$GITHUB_STEP_SUMMARY"

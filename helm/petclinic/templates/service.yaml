@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: {{ $name }}
 spec:
   {{- if eq $name "api-gateway" }}
-  type: LoadBalancer
+  type: {{ $root.Values.exposure.apiGatewayServiceType | default "ClusterIP" }}
   ports:
     - name: http
       port: 80

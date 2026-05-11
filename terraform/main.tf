@@ -1,10 +1,15 @@
-# ─── VPC ─────────────────────────────────────────────────────────────────────
+locals {
+  app_namespace             = "petclinic"
+  eso_namespace             = "external-secrets"
+  eso_service_account_name  = "external-secrets"
+  alb_namespace             = "kube-system"
+  alb_service_account_name  = "aws-load-balancer-controller"
+  cluster_secret_store_name = "aws-secrets-manager"
+}
 
 module "vpc" {
   source = "./modules/vpc"
 }
-
-# ─── EKS ─────────────────────────────────────────────────────────────────────
 
 module "eks" {
   source = "./modules/eks"
@@ -14,16 +19,44 @@ module "eks" {
   subnet_ids   = module.vpc.public_subnet_ids
 }
 
-# ─── ECR ─────────────────────────────────────────────────────────────────────
+module "iam" {
+  source = "./modules/iam"
+
+  environment                = var.environment
+  oidc_provider_arn          = module.eks.oidc_provider_arn
+  oidc_provider_url          = module.eks.oidc_provider_url
+  eso_role_name              = var.eso_role_name
+  eso_namespace              = local.eso_namespace
+  eso_service_account_name   = local.eso_service_account_name
+  alb_role_name              = var.alb_role_name
+  alb_namespace              = local.alb_namespace
+  alb_service_account_name   = local.alb_service_account_name
+  alb_policy_name            = var.alb_policy_name
+  alb_controller_policy_json = file("${path.module}/iam_policy.json")
+}
+
+module "addons" {
+  source = "./modules/addons"
+
+  aws_region                = var.aws_region
+  vpc_id                    = module.vpc.vpc_id
+  app_namespace             = local.app_namespace
+  cluster_secret_store_name = local.cluster_secret_store_name
+  eso_namespace             = local.eso_namespace
+  eso_service_account_name  = local.eso_service_account_name
+  eso_role_arn              = module.iam.eso_role_arn
+  alb_namespace             = local.alb_namespace
+  alb_service_account_name  = local.alb_service_account_name
+  alb_role_arn              = module.iam.alb_role_arn
+  cluster_name              = module.eks.cluster_name
+}
 
 module "ecr" {
   source = "./modules/ecr"
 }
 
-# ─── RDS ─────────────────────────────────────────────────────────────────────
-# RDS security group uses CIDR 10.0.0.0/16 (the VPC CIDR) to allow EKS nodes.
+# RDS security group uses the VPC CIDR to allow EKS nodes.
 # No explicit node security group ID is exported by the EKS module.
-
 module "rds" {
   source = "./modules/rds"
 
