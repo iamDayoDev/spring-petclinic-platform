@@ -4,22 +4,19 @@ on:
   push:
     branches:
       - main
+      - ft/app-pipeline
     paths:
       - "helm/**"
       - ".github/workflows/deploy.yml"
+      - terraform/**
   workflow_dispatch:
-    inputs:
-      image_tag:
-        description: "Optional image tag override. Leave blank to use helm/petclinic/values.yaml."
-        required: false
-        type: string
 
 permissions:
   contents: read
   id-token: write
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
   AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
   CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
   RELEASE_NAME: petclinic
