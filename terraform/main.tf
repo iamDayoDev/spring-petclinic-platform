@@ -53,6 +53,8 @@ module "addons" {
   alb_service_account_name  = local.alb_service_account_name
   alb_role_arn              = module.iam.alb_role_arn
   cluster_name              = module.eks.cluster_name
+
+  depends_on = [module.eks, module.iam]
 }
 
 module "ecr" {

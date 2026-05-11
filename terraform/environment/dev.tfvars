@@ -14,4 +14,5 @@ alb_policy_name = "AWSLoadBalancerControllerIAMPolicy"
 
 cluster_admin_principal_arns = [
   "arn:aws:iam::979779072306:user/Aderinto",
+  "arn:aws:iam::979779072306:role/oidc-github-role",
 ]
