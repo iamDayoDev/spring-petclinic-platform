@@ -1,7 +1,7 @@
 resource "aws_ecr_repository" "ecr_repo" {
   for_each = var.services
 
-  name                 = each.key
+  name                 = "${var.repository_prefix}${each.key}"
   image_tag_mutability = "MUTABLE"
   force_delete         = true
 
@@ -10,7 +10,7 @@ resource "aws_ecr_repository" "ecr_repo" {
   }
 
   tags = {
-    Environment = "production"
+    Environment = var.environment
   }
 }
 

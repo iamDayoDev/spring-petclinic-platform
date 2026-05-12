@@ -47,7 +47,7 @@ spec:
      {{- end }}
       containers:
         - name: {{ $name }}
-          image: {{ include "petclinic.image" (dict "registry" $root.Values.image.registry "name" $name "tag" $root.Values.image.tag) }}
+          image: {{ include "petclinic.image" (dict "registry" $root.Values.image.registry "repositoryPrefix" $root.Values.image.repositoryPrefix "name" $name "tag" $root.Values.image.tag) }}
           imagePullPolicy: Always
           ports:
             - name: http

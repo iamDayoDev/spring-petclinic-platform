@@ -1,6 +1,7 @@
 aws_region  = "us-east-1"
 cluster_name = "petclinic-eks"
 environment  = "dev"
+repository_prefix = "petclinic-dev"
 app_namespace = "petclinic"
 node_instance_type = "t3.small"
 node_desired_size = 2

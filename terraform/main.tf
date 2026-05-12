@@ -59,6 +59,9 @@ module "addons" {
 
 module "ecr" {
   source = "./modules/ecr"
+
+  environment       = var.environment
+  repository_prefix = var.repository_prefix
 }
 
 # RDS security group uses the VPC CIDR to allow EKS nodes.

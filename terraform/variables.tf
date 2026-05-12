@@ -3,15 +3,21 @@ variable "aws_region" {
   type        = string
 }
 
+variable "environment" {
+  description = "Deployment environment (e.g. dev, staging, prod)"
+  type        = string
+}
+
+variable "repository_prefix" {
+  description = "Prefix applied to each ECR repository name"
+  type        = string
+}
+
 variable "cluster_name" {
   description = "Name of the EKS cluster"
   type        = string
 
 }
-variable "environment" { 
-  description = "Deployment environment (e.g. dev, staging, prod)"
-  type        = string
- }
 variable "app_namespace" {
   description = "Namespace used by the Petclinic application"
   type        = string

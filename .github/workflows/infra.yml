@@ -1,15 +1,10 @@
 name: Deploy infrastructure
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "terraform/**"
-      - ".github/workflows/infra.yml"
   push:
     branches:
       - main
+      - ft/app-pipeline
     paths:
       - "terraform/**"
       - ".github/workflows/infra.yml"
