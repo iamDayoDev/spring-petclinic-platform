@@ -8,7 +8,7 @@ on:
     paths:
       - "helm/**"
       - ".github/workflows/deploy.yml"
-      - terraform/**
+  
   workflow_dispatch:
 
 permissions:
