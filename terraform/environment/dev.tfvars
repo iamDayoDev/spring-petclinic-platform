@@ -17,4 +17,3 @@ cluster_admin_principal_arns = [
   "arn:aws:iam::536697234487:user/Joshua",
   "arn:aws:iam::536697234487:role/oidc-github-role",
 ]
-

@@ -27,5 +27,6 @@ app.kubernetes.io/instance: {{ index . "release" }}
 Image reference — call with dict "registry" <reg> "name" <svcName> "tag" <tag>
 */}}
 {{- define "petclinic.image" -}}
-{{ index . "registry" }}/{{ default "" (index . "repositoryPrefix") }}{{ index . "name" }}:{{ index . "tag" }}
+{{- $prefix := trimSuffix "-" (default "" (index . "repositoryPrefix")) -}}
+{{ index . "registry" }}/{{ if $prefix }}{{ $prefix }}-{{ end }}{{ index . "name" }}:{{ index . "tag" }}
 {{- end }}
