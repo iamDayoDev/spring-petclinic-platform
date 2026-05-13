@@ -14,7 +14,7 @@ alb_role_name  = "petclinic-alb-role"
 alb_policy_name = "AWSLoadBalancerControllerIAMPolicy"
 
 cluster_admin_principal_arns = [
-  "arn:aws:iam::536697234487:user/joshua",
+  "arn:aws:iam::536697234487:user/Joshua",
   "arn:aws:iam::536697234487:role/oidc-github-role",
 ]
 
