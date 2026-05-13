@@ -1,4 +1,4 @@
-# Trying to test monitoring stack
+# This workflow deploys the Petclinic application to the EKS cluster using Helm. It can be triggered by pushes to main and ft/app-pipeline branches, as well as manually via workflow_dispatch or from other workflows via repository_dispatch.
 name: Deploy Petclinic App
 
 on:
