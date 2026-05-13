@@ -1,7 +1,7 @@
 image:
   registry: 536697234487.dkr.ecr.us-east-1.amazonaws.com
   repositoryPrefix: petclinic-dev
-  tag: 440a8a7ba41a14445e8105394c998fbad8049f82
+  tag: 19039bd
 
 exposure:
   apiGatewayServiceType: ClusterIP
