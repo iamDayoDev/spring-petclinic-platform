@@ -18,6 +18,16 @@ variable "app_namespace" {
   type        = string
 }
 
+variable "monitoring_namespace" {
+  description = "Namespace where the monitoring stack runs"
+  type        = string
+}
+
+variable "monitoring_grafana_service_type" {
+  description = "Kubernetes service type for Grafana in the monitoring stack"
+  type        = string
+}
+
 variable "cluster_secret_store_name" {
   description = "ClusterSecretStore name used by application ExternalSecrets"
   type        = string

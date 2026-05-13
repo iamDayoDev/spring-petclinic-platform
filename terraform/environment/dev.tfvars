@@ -3,6 +3,7 @@ cluster_name = "petclinic-eks"
 environment  = "dev"
 repository_prefix = "petclinic-dev"
 app_namespace = "petclinic"
+monitoring_grafana_service_type = "ClusterIP"
 node_instance_type = "t3.medium"
 node_desired_size = 2
 node_min_size = 1

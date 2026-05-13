@@ -22,6 +22,11 @@ variable "app_namespace" {
   description = "Namespace used by the Petclinic application"
   type        = string
 }
+variable "monitoring_grafana_service_type" {
+  description = "Kubernetes service type for Grafana in the monitoring stack"
+  type        = string
+  default     = "ClusterIP"
+}
 variable "node_instance_type" {
   description = "EC2 instance type for the EKS managed node group"
   type        = string

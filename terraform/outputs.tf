@@ -68,6 +68,36 @@ output "cluster_secret_store_name" {
   value       = module.addons.cluster_secret_store_name
 }
 
+output "monitoring_namespace" {
+  description = "Namespace where kube-prometheus-stack is installed"
+  value       = module.addons.monitoring_namespace
+}
+
+output "monitoring_release_name" {
+  description = "Helm release name for kube-prometheus-stack"
+  value       = module.addons.monitoring_release_name
+}
+
+output "grafana_service_name" {
+  description = "Kubernetes service name for Grafana"
+  value       = module.addons.grafana_service_name
+}
+
+output "prometheus_service_name" {
+  description = "Kubernetes service name for Prometheus"
+  value       = module.addons.prometheus_service_name
+}
+
+output "grafana_port_forward_command" {
+  description = "Command to access Grafana locally after the monitoring stack is installed"
+  value       = "kubectl port-forward svc/${module.addons.grafana_service_name} 3000:80 -n ${module.addons.monitoring_namespace}"
+}
+
+output "prometheus_port_forward_command" {
+  description = "Command to access Prometheus locally after the monitoring stack is installed"
+  value       = "kubectl port-forward svc/${module.addons.prometheus_service_name} 9090:9090 -n ${module.addons.monitoring_namespace}"
+}
+
 output "configure_kubectl" {
   description = "Command to configure kubectl for the EKS cluster"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"

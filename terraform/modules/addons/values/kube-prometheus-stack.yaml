@@ -1,0 +1,11 @@
+crds:
+  enabled: true
+
+grafana:
+  service:
+    type: ClusterIP
+
+prometheus:
+  prometheusSpec:
+    retention: 10d
+    podMonitorSelectorNilUsesHelmValues: false

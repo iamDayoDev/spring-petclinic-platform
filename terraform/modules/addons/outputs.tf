@@ -17,3 +17,23 @@ output "alb_controller_release_name" {
   description = "Helm release name for the AWS Load Balancer Controller"
   value       = helm_release.aws_load_balancer_controller.name
 }
+
+output "monitoring_namespace" {
+  description = "Namespace where the monitoring stack runs"
+  value       = var.monitoring_namespace
+}
+
+output "monitoring_release_name" {
+  description = "Helm release name for kube-prometheus-stack"
+  value       = helm_release.monitoring.name
+}
+
+output "grafana_service_name" {
+  description = "Kubernetes service name for Grafana"
+  value       = "${helm_release.monitoring.name}-grafana"
+}
+
+output "prometheus_service_name" {
+  description = "Kubernetes service name for Prometheus"
+  value       = "${helm_release.monitoring.name}-kube-prometheus-prometheus"
+}
