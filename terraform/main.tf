@@ -5,6 +5,7 @@ locals {
   alb_service_account_name  = "aws-load-balancer-controller"
   cluster_secret_store_name = "aws-secrets-manager"
   monitoring_namespace      = "monitoring"
+  argocd_namespace          = "argocd"
 }
 
 module "vpc" {
@@ -48,6 +49,8 @@ module "addons" {
   app_namespace             = var.app_namespace
   monitoring_namespace      = local.monitoring_namespace
   monitoring_grafana_service_type = var.monitoring_grafana_service_type
+  argocd_namespace          = local.argocd_namespace
+  argocd_server_service_type = var.argocd_server_service_type
   cluster_secret_store_name = local.cluster_secret_store_name
   eso_namespace             = local.eso_namespace
   eso_service_account_name  = local.eso_service_account_name

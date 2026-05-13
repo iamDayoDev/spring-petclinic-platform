@@ -3,10 +3,12 @@ kind: Application
 metadata:
   name: petclinic
   namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
-    repoURL: https://github.com/etaoko333/petclinic-platform
+    repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
     targetRevision: main
     path: helm/petclinic
     helm:
@@ -21,3 +23,4 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true

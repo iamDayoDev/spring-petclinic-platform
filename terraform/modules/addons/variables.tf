@@ -28,6 +28,16 @@ variable "monitoring_grafana_service_type" {
   type        = string
 }
 
+variable "argocd_namespace" {
+  description = "Namespace where Argo CD runs"
+  type        = string
+}
+
+variable "argocd_server_service_type" {
+  description = "Kubernetes service type for the Argo CD API server"
+  type        = string
+}
+
 variable "cluster_secret_store_name" {
   description = "ClusterSecretStore name used by application ExternalSecrets"
   type        = string

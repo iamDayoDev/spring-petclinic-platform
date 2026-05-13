@@ -37,3 +37,18 @@ output "prometheus_service_name" {
   description = "Kubernetes service name for Prometheus"
   value       = "${helm_release.monitoring.name}-kube-prometheus-prometheus"
 }
+
+output "argocd_namespace" {
+  description = "Namespace where Argo CD runs"
+  value       = var.argocd_namespace
+}
+
+output "argocd_release_name" {
+  description = "Helm release name for Argo CD"
+  value       = helm_release.argocd.name
+}
+
+output "argocd_server_service_name" {
+  description = "Kubernetes service name for the Argo CD API server"
+  value       = "${helm_release.argocd.name}-server"
+}

@@ -98,6 +98,31 @@ output "prometheus_port_forward_command" {
   value       = "kubectl port-forward svc/${module.addons.prometheus_service_name} 9090:9090 -n ${module.addons.monitoring_namespace}"
 }
 
+output "argocd_namespace" {
+  description = "Namespace where Argo CD is installed"
+  value       = module.addons.argocd_namespace
+}
+
+output "argocd_release_name" {
+  description = "Helm release name for Argo CD"
+  value       = module.addons.argocd_release_name
+}
+
+output "argocd_server_service_name" {
+  description = "Kubernetes service name for the Argo CD API server"
+  value       = module.addons.argocd_server_service_name
+}
+
+output "argocd_port_forward_command" {
+  description = "Command to access Argo CD locally after the addon is installed"
+  value       = "kubectl port-forward svc/${module.addons.argocd_server_service_name} 8080:80 -n ${module.addons.argocd_namespace}"
+}
+
+output "argocd_admin_password_command" {
+  description = "Command to read the initial Argo CD admin password after the addon is installed"
+  value       = "kubectl -n ${module.addons.argocd_namespace} get secret argocd-initial-admin-secret -o jsonpath=\"{.data.password}\" | base64 -d"
+}
+
 output "configure_kubectl" {
   description = "Command to configure kubectl for the EKS cluster"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
