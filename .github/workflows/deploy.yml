@@ -12,9 +12,12 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Image tag to deploy. Defaults to the current commit SHA."
+        description: "Image tag to deploy."
         required: false
         type: string
+  repository_dispatch:
+    types:
+    - app-image-built
 
 permissions:
   contents: read
@@ -62,21 +65,35 @@ jobs:
           ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
           IMAGE_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           IMAGE_REPOSITORY_PREFIX="$(awk -F'"' '/^repository_prefix[[:space:]]*=/ { print $2; exit }' "$TF_VARS_FILE")"
+          IMAGE_TAG=""
+          SOURCE_REPOSITORY=""
+          SOURCE_SHA=""
 
           if [ -z "$IMAGE_REPOSITORY_PREFIX" ]; then
             echo "Unable to resolve repository_prefix from '$TF_VARS_FILE'." >&2
             exit 1
           fi
 
-          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            IMAGE_TAG="${{ github.event.client_payload.sha }}"
+            SOURCE_REPOSITORY="${{ vars.PLATFORM_REPO || github.repository }}"
+            SOURCE_SHA="${{ github.event.client_payload.sha }}"
+          elif [ -n "${{ github.event.inputs.image_tag }}" ]; then
             IMAGE_TAG="${{ github.event.inputs.image_tag }}"
           else
-            IMAGE_TAG="${GITHUB_SHA}"
+            IMAGE_TAG="$(awk '/^  tag: / { print $2; exit }' helm/petclinic/values.yaml)"
+          fi
+
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "No image tag was provided. Pass workflow_dispatch.inputs.image_tag or repository_dispatch.client_payload.image_tag." >&2
+            exit 1
           fi
 
           echo "image_registry=$IMAGE_REGISTRY" >> "$GITHUB_OUTPUT"
           echo "image_repository_prefix=$IMAGE_REPOSITORY_PREFIX" >> "$GITHUB_OUTPUT"
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "source_repository=$SOURCE_REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Update kubeconfig
         shell: bash
@@ -166,6 +183,8 @@ jobs:
             echo "- Image registry: \`${{ steps.context.outputs.image_registry }}\`"
             echo "- Image repository prefix: \`${{ steps.context.outputs.image_repository_prefix }}\`"
             echo "- Image tag: \`${{ steps.context.outputs.image_tag }}\`"
+            echo "- Source repository: \`${{ steps.context.outputs.source_repository || github.repository }}\`"
+            echo "- Source SHA: \`${{ steps.context.outputs.source_sha || steps.context.outputs.image_tag }}\`"
             echo "- Ingress host: \`${INGRESS_HOST:-pending}\`"
             echo "- App URL: \`https://$DOMAIN_NAME\`"
             echo "- Infra/bootstrap actions: managed outside this workflow"
