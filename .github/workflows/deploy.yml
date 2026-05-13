@@ -10,6 +10,11 @@ on:
       - ".github/workflows/deploy.yml"
   
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy. Defaults to the current commit SHA."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -23,6 +28,7 @@ env:
   APP_NAMESPACE: petclinic
   DOMAIN_NAME: ${{ vars.DOMAIN_NAME || '' }}
   ACM_CERTIFICATE_ARN: ${{ vars.ACM_CERTIFICATE_ARN || '' }}
+  TF_VARS_FILE: terraform/environment/dev.tfvars
 
 jobs:
   deploy:
@@ -53,12 +59,23 @@ jobs:
         run: |
           set -euo pipefail
 
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          IMAGE_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          IMAGE_REPOSITORY_PREFIX="$(awk -F'"' '/^repository_prefix[[:space:]]*=/ { print $2; exit }' "$TF_VARS_FILE")"
+
+          if [ -z "$IMAGE_REPOSITORY_PREFIX" ]; then
+            echo "Unable to resolve repository_prefix from '$TF_VARS_FILE'." >&2
+            exit 1
+          fi
+
           if [ -n "${{ github.event.inputs.image_tag }}" ]; then
             IMAGE_TAG="${{ github.event.inputs.image_tag }}"
           else
-            IMAGE_TAG="$(awk '/^  tag: / { print $2; exit }' helm/petclinic/values.yaml)"
+            IMAGE_TAG="${GITHUB_SHA}"
           fi
 
+          echo "image_registry=$IMAGE_REGISTRY" >> "$GITHUB_OUTPUT"
+          echo "image_repository_prefix=$IMAGE_REPOSITORY_PREFIX" >> "$GITHUB_OUTPUT"
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Update kubeconfig
@@ -78,10 +95,23 @@ jobs:
             exit 1
           fi
 
-          if ! kubectl get secret openai-secret --namespace "$APP_NAMESPACE" >/dev/null 2>&1; then
-            echo "Secret '$APP_NAMESPACE/openai-secret' is missing. Application secrets must be provisioned before deployment." >&2
+      - name: Create or update OpenAI secret
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "GitHub secret 'OPENAI_API_KEY' is missing or empty." >&2
             exit 1
           fi
+
+          kubectl create secret generic openai-secret \
+            --namespace "$APP_NAMESPACE" \
+            --from-literal=SPRING_AI_OPENAI_API_KEY="$OPENAI_API_KEY" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
 
       - name: Lint chart
         run: helm lint helm/petclinic
@@ -98,6 +128,8 @@ jobs:
             --timeout 15m \
             --set exposure.apiGatewayServiceType=LoadBalancer \
             --set ingress.enabled=false \
+            --set "image.registry=${{ steps.context.outputs.image_registry }}" \
+            --set "image.repositoryPrefix=${{ steps.context.outputs.image_repository_prefix }}" \
             --set "image.tag=${{ steps.context.outputs.image_tag }}"
 
       - name: Wait for ingress hostname
@@ -131,6 +163,8 @@ jobs:
             echo "- Cluster: \`$CLUSTER_NAME\`"
             echo "- Namespace: \`$APP_NAMESPACE\`"
             echo "- Release: \`$RELEASE_NAME\`"
+            echo "- Image registry: \`${{ steps.context.outputs.image_registry }}\`"
+            echo "- Image repository prefix: \`${{ steps.context.outputs.image_repository_prefix }}\`"
             echo "- Image tag: \`${{ steps.context.outputs.image_tag }}\`"
             echo "- Ingress host: \`${INGRESS_HOST:-pending}\`"
             echo "- App URL: \`https://$DOMAIN_NAME\`"
