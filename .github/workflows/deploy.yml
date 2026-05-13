@@ -1,3 +1,4 @@
+# This workflow deploys the Petclinic application to the EKS cluster using Helm. It can be triggered by pushes to main and ft/app-pipeline branches, as well as manually via workflow_dispatch or from other workflows via repository_dispatch.
 name: Deploy Petclinic App
 
 on:
@@ -65,13 +66,28 @@ jobs:
           ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
           IMAGE_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           IMAGE_REPOSITORY_PREFIX="$(awk -F'"' '/^repository_prefix[[:space:]]*=/ { print $2; exit }' "$TF_VARS_FILE")"
+          TF_DOMAIN_NAME="$(awk -F'"' '/^domain[[:space:]]*=/ { print $2; exit }' "$TF_VARS_FILE")"
+          RESOLVED_DOMAIN_NAME="${DOMAIN_NAME:-$TF_DOMAIN_NAME}"
           IMAGE_TAG=""
           SOURCE_REPOSITORY=""
           SOURCE_SHA=""
+          INGRESS_ENABLED="false"
+          INGRESS_HOST=""
+          INGRESS_CERTIFICATE_ARN=""
 
           if [ -z "$IMAGE_REPOSITORY_PREFIX" ]; then
             echo "Unable to resolve repository_prefix from '$TF_VARS_FILE'." >&2
             exit 1
+          fi
+
+          if [ -n "$RESOLVED_DOMAIN_NAME" ] || [ -n "${ACM_CERTIFICATE_ARN:-}" ]; then
+            if [ -z "$RESOLVED_DOMAIN_NAME" ] || [ -z "${ACM_CERTIFICATE_ARN:-}" ]; then
+              echo "Set both DOMAIN_NAME and ACM_CERTIFICATE_ARN to enable ingress." >&2
+              exit 1
+            fi
+            INGRESS_ENABLED="true"
+            INGRESS_HOST="$RESOLVED_DOMAIN_NAME"
+            INGRESS_CERTIFICATE_ARN="$ACM_CERTIFICATE_ARN"
           fi
 
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
@@ -94,6 +110,10 @@ jobs:
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "source_repository=$SOURCE_REPOSITORY" >> "$GITHUB_OUTPUT"
           echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "resolved_domain_name=$RESOLVED_DOMAIN_NAME" >> "$GITHUB_OUTPUT"
+          echo "ingress_enabled=$INGRESS_ENABLED" >> "$GITHUB_OUTPUT"
+          echo "ingress_host=$INGRESS_HOST" >> "$GITHUB_OUTPUT"
+          echo "ingress_certificate_arn=$INGRESS_CERTIFICATE_ARN" >> "$GITHUB_OUTPUT"
 
       - name: Update kubeconfig
         shell: bash
@@ -138,43 +158,86 @@ jobs:
         run: |
           set -euo pipefail
 
-          helm upgrade --install "$RELEASE_NAME" helm/petclinic \
-            --namespace "$APP_NAMESPACE" \
-            --create-namespace \
-            --wait \
-            --timeout 15m \
-            --set exposure.apiGatewayServiceType=LoadBalancer \
-            --set ingress.enabled=false \
-            --set "image.registry=${{ steps.context.outputs.image_registry }}" \
-            --set "image.repositoryPrefix=${{ steps.context.outputs.image_repository_prefix }}" \
+          HELM_ARGS=(
+            upgrade --install "$RELEASE_NAME" helm/petclinic
+            --namespace "$APP_NAMESPACE"
+            --create-namespace
+            --wait
+            --timeout 15m
+            --set "image.registry=${{ steps.context.outputs.image_registry }}"
+            --set "image.repositoryPrefix=${{ steps.context.outputs.image_repository_prefix }}"
             --set "image.tag=${{ steps.context.outputs.image_tag }}"
+          )
 
-      - name: Wait for ingress hostname
-        id: ingress
+          if [ "${{ steps.context.outputs.ingress_enabled }}" = "true" ]; then
+            HELM_ARGS+=(
+              --set exposure.apiGatewayServiceType=ClusterIP
+              --set ingress.enabled=true
+              --set "ingress.host=${{ steps.context.outputs.ingress_host }}"
+              --set "ingress.certificateArn=${{ steps.context.outputs.ingress_certificate_arn }}"
+            )
+          else
+            HELM_ARGS+=(
+              --set exposure.apiGatewayServiceType=LoadBalancer
+              --set ingress.enabled=false
+            )
+          fi
+
+          helm "${HELM_ARGS[@]}"
+
+      - name: Wait for public hostname
+        id: endpoint
         shell: bash
         run: |
           set -euo pipefail
 
+          if [ "${{ steps.context.outputs.ingress_enabled }}" = "true" ]; then
+            for _ in $(seq 1 40); do
+              PUBLIC_HOST="$(kubectl get ingress "${RELEASE_NAME}-ingress" \
+                --namespace "$APP_NAMESPACE" \
+                --output jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+              if [ -n "$PUBLIC_HOST" ]; then
+                echo "public_host=$PUBLIC_HOST" >> "$GITHUB_OUTPUT"
+                echo "endpoint_mode=ingress" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              sleep 15
+            done
+
+            echo "Ingress hostname was not assigned within the timeout window." >&2
+            exit 1
+          fi
+
           for _ in $(seq 1 40); do
-            ALB_HOST="$(kubectl get ingress "${RELEASE_NAME}-ingress" \
+            PUBLIC_HOST="$(kubectl get service api-gateway \
               --namespace "$APP_NAMESPACE" \
               --output jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
-            if [ -n "$ALB_HOST" ]; then
-              echo "alb_host=$ALB_HOST" >> "$GITHUB_OUTPUT"
+            if [ -n "$PUBLIC_HOST" ]; then
+              echo "public_host=$PUBLIC_HOST" >> "$GITHUB_OUTPUT"
+              echo "endpoint_mode=service" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             sleep 15
           done
 
-          echo "ALB hostname was not assigned within the timeout window." >&2
+          echo "Service LoadBalancer hostname was not assigned within the timeout window." >&2
           exit 1
 
       - name: Deployment summary
         if: always()
         shell: bash
         env:
-          INGRESS_HOST: ${{ steps.ingress.outputs.alb_host }}
+          PUBLIC_HOST: ${{ steps.endpoint.outputs.public_host }}
+          ENDPOINT_MODE: ${{ steps.endpoint.outputs.endpoint_mode }}
         run: |
+          if [ -n "${{ steps.context.outputs.ingress_host }}" ]; then
+            APP_URL="https://${{ steps.context.outputs.ingress_host }}"
+          elif [ -n "${PUBLIC_HOST:-}" ]; then
+            APP_URL="http://${PUBLIC_HOST}"
+          else
+            APP_URL="pending"
+          fi
+
           {
             echo "### Application deployment"
             echo "- Cluster: \`$CLUSTER_NAME\`"
@@ -185,7 +248,9 @@ jobs:
             echo "- Image tag: \`${{ steps.context.outputs.image_tag }}\`"
             echo "- Source repository: \`${{ steps.context.outputs.source_repository || github.repository }}\`"
             echo "- Source SHA: \`${{ steps.context.outputs.source_sha || steps.context.outputs.image_tag }}\`"
-            echo "- Ingress host: \`${INGRESS_HOST:-pending}\`"
-            echo "- App URL: \`https://$DOMAIN_NAME\`"
+            echo "- Endpoint mode: \`${ENDPOINT_MODE:-pending}\`"
+            echo "- Public hostname: \`${PUBLIC_HOST:-pending}\`"
+            echo "- App host: \`${{ steps.context.outputs.ingress_host || 'pending' }}\`"
+            echo "- App URL: \`${APP_URL}\`"
             echo "- Infra/bootstrap actions: managed outside this workflow"
           } >> "$GITHUB_STEP_SUMMARY"
