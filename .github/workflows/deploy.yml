@@ -76,7 +76,7 @@ jobs:
 
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
             IMAGE_TAG="${{ github.event.client_payload.sha }}"
-            SOURCE_REPOSITORY="${{ vars.PLATFORM_REPO || github.repository }}"
+            SOURCE_REPOSITORY="${{ github.event.client_payload.source_repository }}"
             SOURCE_SHA="${{ github.event.client_payload.sha }}"
           elif [ -n "${{ github.event.inputs.image_tag }}" ]; then
             IMAGE_TAG="${{ github.event.inputs.image_tag }}"
