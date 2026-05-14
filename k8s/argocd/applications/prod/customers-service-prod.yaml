@@ -1,28 +1,29 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: petclinic-secrets-dev
+  name: customers-service-prod
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "30"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   sources:
-    - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
       targetRevision: main
-      path: helm/petclinic-secrets
+      path: helm/petclinic-service
       helm:
-        releaseName: petclinic-secrets
+        releaseName: customers-service
         valueFiles:
-          - $values/helm-values/secrets-dev.yaml
-    - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
+          - $values/helm-values/prod.yaml
+          - $values/helm-values/customers-service.yaml
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
       targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
-    namespace: petclinic
+    namespace: petclinic-prod
   syncPolicy:
     automated:
       prune: true

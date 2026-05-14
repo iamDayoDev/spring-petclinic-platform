@@ -1,5 +1,5 @@
 image:
-  registry: ""
+  registry: 536697234487.dkr.ecr.us-east-1.amazonaws.com
   repositoryPrefix: petclinic-prod
   tag: ""
   pullPolicy: IfNotPresent
