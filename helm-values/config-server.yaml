@@ -1,5 +1,5 @@
 image:
-  tag: 19039bd
+  tag: "098fe1f"
 
 service:
   name: config-server
