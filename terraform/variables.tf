@@ -25,12 +25,10 @@ variable "app_namespace" {
 variable "monitoring_grafana_service_type" {
   description = "Kubernetes service type for Grafana in the monitoring stack"
   type        = string
-  default     = "ClusterIP"
 }
 variable "argocd_server_service_type" {
   description = "Kubernetes service type for the Argo CD API server"
   type        = string
-  default     = "ClusterIP"
 }
 variable "node_instance_type" {
   description = "EC2 instance type for the EKS managed node group"

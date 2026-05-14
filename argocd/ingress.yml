@@ -12,7 +12,7 @@ metadata:
     alb.ingress.kubernetes.io/ssl-redirect: '443'
 spec:
   rules:
-  - host: eta-oko.com
+  - host: petclinic.dayoclouddev.site
     http:
       paths:
       - path: /
