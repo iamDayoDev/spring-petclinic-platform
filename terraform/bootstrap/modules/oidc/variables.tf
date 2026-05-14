@@ -5,8 +5,8 @@ variable "environment" {
 
 variable "github_owner" {
   description = "GitHub organization or user that owns the repository"
-  type        = string
-}
+  type        = set(string)
+  }
 
 variable "github_repositories" {
   description = "GitHub repository names allowed to assume the role"

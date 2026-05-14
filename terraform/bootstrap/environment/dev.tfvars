@@ -1,10 +1,11 @@
 aws_region  = "us-east-1"
 environment = "dev"
 
-github_owner = "Achievers11-DevOps"
+github_owner = ["Achievers11-DevOps", "iamDayoDev"]
 github_repositories = [
   "petclinic-k8s-platform",
   "petclinic-microservices",
+  "spring-petclinic-platform"
 ]
 
 github_oidc_role_name = "oidc-github-role"

@@ -3,17 +3,19 @@ locals {
     Environment = var.environment
   }
 
-  github_repository_full_names = [
-    for repository in var.github_repositories : "${var.github_owner}/${repository}"
-  ]
+  github_repo_subjects = toset([
+    for pair in setproduct(var.github_owner, var.github_repositories) :
+    "${pair[0]}/${pair[1]}"
+  ])
+
   allowed_subjects = concat(
     flatten([
-      for repository in local.github_repository_full_names : [
+      for repository in local.github_repo_subjects : [
         for branch in var.allowed_branches : "repo:${repository}:ref:refs/heads/${branch}"
       ]
     ]),
     var.allow_pull_requests ? [
-      for repository in local.github_repository_full_names : "repo:${repository}:pull_request"
+      for repository in local.github_repo_subjects : "repo:${repository}:pull_request"
     ] : []
   )
 }
