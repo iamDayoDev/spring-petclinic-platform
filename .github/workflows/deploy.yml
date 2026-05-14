@@ -1,4 +1,4 @@
-# Trigger
+# Trigger Deploy
 name: Deploy Petclinic App
 
 on:
