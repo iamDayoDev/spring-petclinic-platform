@@ -12,6 +12,7 @@ github_oidc_role_name = "oidc-github-role"
 
 allowed_branches = [
   "main",
+  "ft/app-pipeline",
 ]
 
 # Broad permissions keep bootstrap simple for the first pass so GitHub Actions
