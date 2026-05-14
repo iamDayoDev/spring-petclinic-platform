@@ -296,6 +296,30 @@ jobs:
 
           helm "${SERVICE_LINT_ARGS[@]}"
 
+      - name: Recover shared secrets release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! helm status "$SECRETS_RELEASE_NAME" --namespace "$APP_NAMESPACE" >/tmp/petclinic-secrets-status.txt 2>/dev/null; then
+            exit 0
+          fi
+
+          RELEASE_STATUS="$(awk '/^STATUS:/ { print $2; exit }' /tmp/petclinic-secrets-status.txt)"
+
+          case "$RELEASE_STATUS" in
+            deployed|superseded)
+              echo "$SECRETS_RELEASE_NAME is $RELEASE_STATUS; continuing with upgrade."
+              ;;
+            failed|pending-install|pending-upgrade|pending-rollback|uninstalling)
+              echo "$SECRETS_RELEASE_NAME is $RELEASE_STATUS; uninstalling before clean install."
+              helm uninstall "$SECRETS_RELEASE_NAME" --namespace "$APP_NAMESPACE" || true
+              ;;
+            *)
+              echo "$SECRETS_RELEASE_NAME has unexpected status '$RELEASE_STATUS'; continuing with upgrade."
+              ;;
+          esac
+
       - name: Install shared secrets chart
         shell: bash
         run: |
