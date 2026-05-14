@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: config-server-dev
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
+      targetRevision: main
+      path: helm/petclinic-service
+      helm:
+        releaseName: config-server
+        valueFiles:
+          - $values/helm-values/dev.yaml
+          - $values/helm-values/config-server.yaml
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: petclinic
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
