@@ -1,19 +1,21 @@
 aws_region  = "us-east-1"
 environment = "dev"
 
-github_owner = ["Achievers11-DevOps", "iamDayoDev"]
+# github_owner = ["Achievers11-DevOps", "iamDayoDev"]
+github_owner = ["iamDayoDev"]
 github_repositories = [
-  "petclinic-k8s-platform",
-  "petclinic-microservices",
-  "spring-petclinic-platform"
+  # "petclinic-k8s-platform",
+  # "petclinic-microservices",
+  "spring-petclinic-platform",
+  "spring-petclinic-microservices",
 ]
 
 github_oidc_role_name = "oidc-github-role"
 
 allowed_branches = [
   "main",
-  "ft/app-pipeline",
-  "ft/app-build",
+  # "ft/app-pipeline",
+  # "ft/app-build",
 ]
 
 # Broad permissions keep bootstrap simple for the first pass so GitHub Actions

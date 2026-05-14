@@ -25,15 +25,26 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Update service values file
+        id: context
         shell: bash
         env:
-          SERVICE: ${{ github.event.client_payload.service }}
+          SERVICE: ${{ github.event.client_payload.service || github.event.client_payload.service_name || github.event.client_payload.app || github.event.client_payload.repository || github.event.client_payload.repo || '' }}
+          SERVICES: ${{ github.event.client_payload.services || '' }}
           IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.sha }}
         run: |
           set -euo pipefail
 
+          if [ -z "${SERVICE}" ] && [ -n "${SERVICES}" ]; then
+            SERVICE="${SERVICES%%,*}"
+            SERVICE="${SERVICE%% *}"
+          fi
+
+          SERVICE="${SERVICE#petclinic-dev-}"
+          SERVICE="${SERVICE#petclinic-prod-}"
+
           if [ -z "${SERVICE}" ]; then
-            echo "client_payload.service is required"
+            echo "client_payload.service is required. Accepted keys: service, service_name, app, repository, repo, or services." >&2
+            echo 'Example payload: {"service":"config-server","image_tag":"10e58c5"}' >&2
             exit 1
           fi
 
@@ -68,12 +79,15 @@ jobs:
 
           git diff -- "${values_file}"
 
+          echo "service=${SERVICE}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
       - name: Commit updated tag
         id: commit
         shell: bash
         env:
-          SERVICE: ${{ github.event.client_payload.service }}
-          IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.sha }}
+          SERVICE: ${{ steps.context.outputs.service }}
+          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
         run: |
           set -euo pipefail
 
@@ -92,8 +106,8 @@ jobs:
         if: steps.commit.outputs.changed == 'true'
         uses: actions/github-script@v7
         env:
-          SERVICE: ${{ github.event.client_payload.service }}
-          IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.sha }}
+          SERVICE: ${{ steps.context.outputs.service }}
+          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
           SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
           SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
         with:
