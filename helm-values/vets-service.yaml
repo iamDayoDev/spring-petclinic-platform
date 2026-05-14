@@ -1,0 +1,22 @@
+image:
+  tag: 19039bd
+
+service:
+  name: vets-service
+  port: 8083
+  targetPort: http
+
+container:
+  port: 8083
+
+spring:
+  profiles: docker,mysql
+
+dependencies:
+  configServer:
+    enabled: true
+  discoveryServer:
+    enabled: true
+
+mysql:
+  enabled: true

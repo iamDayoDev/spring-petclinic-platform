@@ -2,13 +2,13 @@
 name: Deploy Petclinic App
 
 on:
-  push:
-    branches:
-      - main
-      - ft/app-pipeline
-    paths:
-      - "helm/**"
-      - ".github/workflows/deploy.yml"
+  # push:
+  #   branches:
+  #     - main
+  #     - ft/app-pipeline
+  #   paths:
+  #     - "helm/**"
+  #     - ".github/workflows/deploy.yml"
   
   workflow_dispatch:
     inputs:
@@ -18,7 +18,7 @@ on:
         type: string
   repository_dispatch:
     types:
-    - app-image-built
+    - deploy-helm
 
 permissions:
   contents: read
@@ -59,6 +59,7 @@ jobs:
       
 
       - name: Fetch latest image tag from ECR
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.image_tag == '')
         id: ecr
         shell: bash
         run: |
@@ -111,9 +112,17 @@ jobs:
           fi
 
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            IMAGE_TAG="${{ github.event.client_payload.sha }}"
+            IMAGE_TAG="${{ github.event.client_payload.image_tag }}"
             SOURCE_REPOSITORY="${{ github.event.client_payload.source_repository }}"
-            SOURCE_SHA="${{ github.event.client_payload.sha }}"
+            SOURCE_SHA="${{ github.event.client_payload.source_sha }}"
+
+            if [ -z "$IMAGE_TAG" ]; then
+              IMAGE_TAG="${{ github.event.client_payload.sha }}"
+            fi
+
+            if [ -z "$SOURCE_SHA" ]; then
+              SOURCE_SHA="${{ github.event.client_payload.sha }}"
+            fi
           elif [ -n "${{ github.event.inputs.image_tag }}" ]; then
             IMAGE_TAG="${{ github.event.inputs.image_tag }}"
           else

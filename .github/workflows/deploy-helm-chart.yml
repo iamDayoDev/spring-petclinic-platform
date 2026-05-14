@@ -1,0 +1,424 @@
+name: Deploy Petclinic Service Helm Chart
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Petclinic service to deploy."
+        required: true
+        type: choice
+        options:
+          - admin-server
+          - api-gateway
+          - config-server
+          - customers-service
+          - discovery-server
+          - genai-service
+          - vets-service
+          - visits-service
+      image_tag:
+        description: "Optional image tag. Defaults to helm-values/<service>.yaml."
+        required: false
+        type: string
+      environment:
+        description: "Values environment to use."
+        required: false
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+  repository_dispatch:
+    types:
+      - deploy-helm-chart
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+  CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+  APP_NAMESPACE: petclinic
+  DOMAIN_NAME: ${{ vars.DOMAIN_NAME || '' }}
+  ACM_CERTIFICATE_ARN: ${{ vars.ACM_CERTIFICATE_ARN || '' }}
+  TF_VARS_FILE: terraform/environment/dev.tfvars
+  SERVICE_CHART: helm/petclinic-service
+  SECRETS_CHART: helm/petclinic-secrets
+  SECRETS_RELEASE_NAME: petclinic-secrets
+
+jobs:
+  deploy:
+    name: Deploy service chart
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4.3.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: gha-service-helm-${{ github.run_id }}
+          unset-current-credentials: true
+
+      - name: Resolve deploy context
+        id: context
+        shell: bash
+        env:
+          DISPATCH_SERVICE: ${{ github.event.client_payload.service || '' }}
+          DISPATCH_IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.sha || '' }}
+          DISPATCH_ENVIRONMENT: ${{ github.event.client_payload.environment || '' }}
+          DISPATCH_SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
+          DISPATCH_SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
+          INPUT_SERVICE: ${{ inputs.service || '' }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag || '' }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment || '' }}
+        run: |
+          set -euo pipefail
+
+          SERVICE="${DISPATCH_SERVICE:-$INPUT_SERVICE}"
+          DEPLOY_ENV="${DISPATCH_ENVIRONMENT:-${INPUT_ENVIRONMENT:-dev}}"
+          IMAGE_TAG="${DISPATCH_IMAGE_TAG:-$INPUT_IMAGE_TAG}"
+          SOURCE_REPOSITORY="$DISPATCH_SOURCE_REPOSITORY"
+          SOURCE_SHA="$DISPATCH_SOURCE_SHA"
+
+          case "$SERVICE" in
+            admin-server|api-gateway|config-server|customers-service|discovery-server|genai-service|vets-service|visits-service)
+              ;;
+            *)
+              echo "Unsupported or empty service: $SERVICE" >&2
+              exit 1
+              ;;
+          esac
+
+          ENV_VALUES_FILE="helm-values/${DEPLOY_ENV}.yaml"
+          SERVICE_VALUES_FILE="helm-values/${SERVICE}.yaml"
+          SECRETS_VALUES_FILE="helm-values/secrets-${DEPLOY_ENV}.yaml"
+
+          for values_file in "$ENV_VALUES_FILE" "$SERVICE_VALUES_FILE" "$SECRETS_VALUES_FILE"; do
+            if [ ! -f "$values_file" ]; then
+              echo "Values file not found: $values_file" >&2
+              exit 1
+            fi
+          done
+
+          if [ -z "$IMAGE_TAG" ]; then
+            IMAGE_TAG="$(awk '
+              /^image:/ { in_image=1; next }
+              in_image && /^[^[:space:]]/ { exit }
+              in_image && /^[[:space:]]*tag:/ {
+                sub(/^[[:space:]]*tag:[[:space:]]*/, "", $0)
+                gsub(/"/, "", $0)
+                print $0
+                exit
+              }
+            ' "$SERVICE_VALUES_FILE")"
+          fi
+
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "No image tag was provided and no image.tag was found in $SERVICE_VALUES_FILE." >&2
+            exit 1
+          fi
+
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          IMAGE_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          IMAGE_REPOSITORY_PREFIX="$(awk -F'"' '/^repository_prefix[[:space:]]*=/ { print $2; exit }' "$TF_VARS_FILE")"
+          TF_DOMAIN_NAME="$(awk -F'"' '/^domain[[:space:]]*=/ { print $2; exit }' "$TF_VARS_FILE")"
+          RESOLVED_DOMAIN_NAME="${DOMAIN_NAME:-$TF_DOMAIN_NAME}"
+          CLUSTER_SECRET_STORE="$(awk '/^[[:space:]]*secretStoreName:/ { print $2; exit }' "$SECRETS_VALUES_FILE")"
+
+          if [ -z "$IMAGE_REPOSITORY_PREFIX" ]; then
+            echo "Unable to resolve repository_prefix from $TF_VARS_FILE." >&2
+            exit 1
+          fi
+
+          if [ -z "$CLUSTER_SECRET_STORE" ]; then
+            echo "Unable to resolve externalSecret.secretStoreName from $SECRETS_VALUES_FILE." >&2
+            exit 1
+          fi
+
+          INGRESS_ENABLED="false"
+          SERVICE_TYPE="ClusterIP"
+          ENDPOINT_KIND="none"
+          INGRESS_HOST=""
+          INGRESS_CERTIFICATE_ARN=""
+
+          if [ "$SERVICE" = "api-gateway" ]; then
+            if [ -n "$RESOLVED_DOMAIN_NAME" ] || [ -n "${ACM_CERTIFICATE_ARN:-}" ]; then
+              if [ -z "$RESOLVED_DOMAIN_NAME" ] || [ -z "${ACM_CERTIFICATE_ARN:-}" ]; then
+                echo "Set both DOMAIN_NAME and ACM_CERTIFICATE_ARN to enable api-gateway ingress." >&2
+                exit 1
+              fi
+
+              INGRESS_ENABLED="true"
+              SERVICE_TYPE="ClusterIP"
+              ENDPOINT_KIND="ingress"
+              INGRESS_HOST="$RESOLVED_DOMAIN_NAME"
+              INGRESS_CERTIFICATE_ARN="$ACM_CERTIFICATE_ARN"
+            else
+              SERVICE_TYPE="LoadBalancer"
+              ENDPOINT_KIND="service"
+            fi
+          fi
+
+          {
+            echo "service=$SERVICE"
+            echo "deploy_env=$DEPLOY_ENV"
+            echo "env_values_file=$ENV_VALUES_FILE"
+            echo "service_values_file=$SERVICE_VALUES_FILE"
+            echo "secrets_values_file=$SECRETS_VALUES_FILE"
+            echo "cluster_secret_store=$CLUSTER_SECRET_STORE"
+            echo "image_registry=$IMAGE_REGISTRY"
+            echo "image_repository_prefix=$IMAGE_REPOSITORY_PREFIX"
+            echo "image_tag=$IMAGE_TAG"
+            echo "service_type=$SERVICE_TYPE"
+            echo "ingress_enabled=$INGRESS_ENABLED"
+            echo "ingress_host=$INGRESS_HOST"
+            echo "ingress_certificate_arn=$INGRESS_CERTIFICATE_ARN"
+            echo "endpoint_kind=$ENDPOINT_KIND"
+            echo "source_repository=$SOURCE_REPOSITORY"
+            echo "source_sha=$SOURCE_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update kubeconfig
+        shell: bash
+        run: |
+          aws eks update-kubeconfig \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Validate cluster prerequisites
+        shell: bash
+        env:
+          CLUSTER_SECRET_STORE: ${{ steps.context.outputs.cluster_secret_store }}
+        run: |
+          set -euo pipefail
+
+          kubectl create namespace "$APP_NAMESPACE" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          if ! kubectl get crd externalsecrets.external-secrets.io >/dev/null 2>&1; then
+            echo "ExternalSecret CRD is missing. Apply the Terraform addons layer first." >&2
+            exit 1
+          fi
+
+          if ! kubectl get crd clustersecretstores.external-secrets.io >/dev/null 2>&1; then
+            echo "ClusterSecretStore CRD is missing. Apply the Terraform addons layer first." >&2
+            exit 1
+          fi
+
+          if ! kubectl get clustersecretstore "$CLUSTER_SECRET_STORE" >/dev/null 2>&1; then
+            echo "ClusterSecretStore '$CLUSTER_SECRET_STORE' is missing. Apply the Terraform addons layer first." >&2
+            exit 1
+          fi
+
+      - name: Create or update OpenAI secret
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "GitHub secret OPENAI_API_KEY is missing or empty." >&2
+            exit 1
+          fi
+
+          kubectl create secret generic openai-secret \
+            --namespace "$APP_NAMESPACE" \
+            --from-literal=SPRING_AI_OPENAI_API_KEY="$OPENAI_API_KEY" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+      - name: Check ExternalSecret ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! kubectl get externalsecret petclinic-db-secret --namespace "$APP_NAMESPACE" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          OWNER="$(kubectl get externalsecret petclinic-db-secret \
+            --namespace "$APP_NAMESPACE" \
+            -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || true)"
+
+          if [ -z "$OWNER" ]; then
+            echo "ExternalSecret petclinic-db-secret already exists but is not owned by Helm release '$SECRETS_RELEASE_NAME'." >&2
+            echo "Delete or migrate that ExternalSecret before using the shared secrets chart." >&2
+            exit 1
+          fi
+
+          if [ -n "$OWNER" ] && [ "$OWNER" != "$SECRETS_RELEASE_NAME" ]; then
+            echo "ExternalSecret petclinic-db-secret is already owned by Helm release '$OWNER'." >&2
+            echo "Uninstall the old umbrella release or remove its ExternalSecret before using $SECRETS_RELEASE_NAME." >&2
+            exit 1
+          fi
+
+      - name: Lint Helm charts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm lint "$SECRETS_CHART" \
+            -f "${{ steps.context.outputs.secrets_values_file }}"
+
+          SERVICE_LINT_ARGS=(
+            lint "$SERVICE_CHART"
+            -f "${{ steps.context.outputs.env_values_file }}"
+            -f "${{ steps.context.outputs.service_values_file }}"
+            --set "image.registry=${{ steps.context.outputs.image_registry }}"
+            --set "image.repositoryPrefix=${{ steps.context.outputs.image_repository_prefix }}"
+            --set "image.tag=${{ steps.context.outputs.image_tag }}"
+            --set "service.type=${{ steps.context.outputs.service_type }}"
+            --set "ingress.enabled=${{ steps.context.outputs.ingress_enabled }}"
+          )
+
+          if [ "${{ steps.context.outputs.ingress_enabled }}" = "true" ]; then
+            SERVICE_LINT_ARGS+=(
+              --set "ingress.host=${{ steps.context.outputs.ingress_host }}"
+              --set "ingress.certificateArn=${{ steps.context.outputs.ingress_certificate_arn }}"
+            )
+          fi
+
+          helm "${SERVICE_LINT_ARGS[@]}"
+
+      - name: Install shared secrets chart
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm upgrade --install "$SECRETS_RELEASE_NAME" "$SECRETS_CHART" \
+            --namespace "$APP_NAMESPACE" \
+            --create-namespace \
+            --wait \
+            --timeout 5m \
+            -f "${{ steps.context.outputs.secrets_values_file }}"
+
+      - name: Wait for database secret
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for _ in $(seq 1 40); do
+            if kubectl get secret mysql-secret --namespace "$APP_NAMESPACE" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 5
+          done
+
+          kubectl get externalsecret petclinic-db-secret --namespace "$APP_NAMESPACE" -o yaml || true
+          echo "mysql-secret was not created by External Secrets within the timeout window." >&2
+          exit 1
+
+      - name: Deploy service Helm release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HELM_ARGS=(
+            upgrade --install "${{ steps.context.outputs.service }}" "$SERVICE_CHART"
+            --namespace "$APP_NAMESPACE"
+            --create-namespace
+            --wait
+            --timeout 15m
+            -f "${{ steps.context.outputs.env_values_file }}"
+            -f "${{ steps.context.outputs.service_values_file }}"
+            --set "image.registry=${{ steps.context.outputs.image_registry }}"
+            --set "image.repositoryPrefix=${{ steps.context.outputs.image_repository_prefix }}"
+            --set "image.tag=${{ steps.context.outputs.image_tag }}"
+            --set "service.type=${{ steps.context.outputs.service_type }}"
+            --set "ingress.enabled=${{ steps.context.outputs.ingress_enabled }}"
+          )
+
+          if [ "${{ steps.context.outputs.ingress_enabled }}" = "true" ]; then
+            HELM_ARGS+=(
+              --set "ingress.host=${{ steps.context.outputs.ingress_host }}"
+              --set "ingress.certificateArn=${{ steps.context.outputs.ingress_certificate_arn }}"
+            )
+          fi
+
+          helm "${HELM_ARGS[@]}"
+
+      - name: Wait for public endpoint
+        id: endpoint
+        if: steps.context.outputs.endpoint_kind != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ steps.context.outputs.endpoint_kind }}" = "ingress" ]; then
+            for _ in $(seq 1 40); do
+              PUBLIC_HOST="$(kubectl get ingress "${{ steps.context.outputs.service }}-ingress" \
+                --namespace "$APP_NAMESPACE" \
+                --output jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+              if [ -n "$PUBLIC_HOST" ]; then
+                echo "public_host=$PUBLIC_HOST" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              sleep 15
+            done
+
+            echo "Ingress hostname was not assigned within the timeout window." >&2
+            exit 1
+          fi
+
+          for _ in $(seq 1 40); do
+            PUBLIC_HOST="$(kubectl get service "${{ steps.context.outputs.service }}" \
+              --namespace "$APP_NAMESPACE" \
+              --output jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+            if [ -n "$PUBLIC_HOST" ]; then
+              echo "public_host=$PUBLIC_HOST" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "Service LoadBalancer hostname was not assigned within the timeout window." >&2
+          exit 1
+
+      - name: Deployment summary
+        if: always()
+        shell: bash
+        env:
+          PUBLIC_HOST: ${{ steps.endpoint.outputs.public_host }}
+        run: |
+          if [ -n "${{ steps.context.outputs.ingress_host }}" ]; then
+            APP_URL="https://${{ steps.context.outputs.ingress_host }}"
+          elif [ -n "${PUBLIC_HOST:-}" ]; then
+            APP_URL="http://${PUBLIC_HOST}"
+          else
+            APP_URL="internal-only"
+          fi
+
+          {
+            echo "### Petclinic service deployment"
+            echo "- Cluster: \`$CLUSTER_NAME\`"
+            echo "- Namespace: \`$APP_NAMESPACE\`"
+            echo "- Environment: \`${{ steps.context.outputs.deploy_env }}\`"
+            echo "- Service release: \`${{ steps.context.outputs.service }}\`"
+            echo "- Secrets release: \`$SECRETS_RELEASE_NAME\`"
+            echo "- Image registry: \`${{ steps.context.outputs.image_registry }}\`"
+            echo "- Image repository prefix: \`${{ steps.context.outputs.image_repository_prefix }}\`"
+            echo "- Image tag: \`${{ steps.context.outputs.image_tag }}\`"
+            echo "- Service type: \`${{ steps.context.outputs.service_type }}\`"
+            echo "- Ingress enabled: \`${{ steps.context.outputs.ingress_enabled }}\`"
+            echo "- App host: \`${{ steps.context.outputs.ingress_host || 'none' }}\`"
+            echo "- Public hostname: \`${PUBLIC_HOST:-none}\`"
+            echo "- App URL: \`${APP_URL}\`"
+            echo "- Source repository: \`${{ steps.context.outputs.source_repository || github.repository }}\`"
+            echo "- Source SHA: \`${{ steps.context.outputs.source_sha || steps.context.outputs.image_tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

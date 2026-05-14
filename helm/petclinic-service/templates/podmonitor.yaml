@@ -1,0 +1,20 @@
+{{- if and .Values.metrics.podMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "petclinic-service.fullname" . }}
+  labels:
+    {{- include "petclinic-service.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ include "petclinic-service.name" . }}
+    {{- with .Values.metrics.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "petclinic-service.selectorLabels" . | nindent 6 }}
+  podMetricsEndpoints:
+    - port: http
+      path: {{ .Values.metrics.path }}
+      interval: {{ .Values.metrics.podMonitor.interval }}
+{{- end }}

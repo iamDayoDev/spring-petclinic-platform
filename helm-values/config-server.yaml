@@ -1,0 +1,19 @@
+image:
+  tag: 19039bd
+
+service:
+  name: config-server
+  port: 8888
+  targetPort: http
+
+container:
+  port: 8888
+
+spring:
+  profiles: default
+
+dependencies:
+  configServer:
+    enabled: false
+  discoveryServer:
+    enabled: false

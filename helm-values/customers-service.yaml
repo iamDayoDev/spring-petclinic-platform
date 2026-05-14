@@ -1,0 +1,22 @@
+image:
+  tag: 19039bd
+
+service:
+  name: customers-service
+  port: 8081
+  targetPort: http
+
+container:
+  port: 8081
+
+spring:
+  profiles: docker,mysql
+
+dependencies:
+  configServer:
+    enabled: true
+  discoveryServer:
+    enabled: true
+
+mysql:
+  enabled: true

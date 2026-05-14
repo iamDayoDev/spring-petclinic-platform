@@ -17,7 +17,7 @@ on:
         type: string
   repository_dispatch:
     types:
-      - app-image-built
+      - deploy-argocd
 
 permissions:
   contents: write
