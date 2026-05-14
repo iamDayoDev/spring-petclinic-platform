@@ -57,6 +57,9 @@ locals {
     "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
     "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
   ]
+  cluster_admin_principal_map = {
+    for arn in var.cluster_admin_principal_arns : arn => arn
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "node_policies" {
@@ -101,6 +104,10 @@ resource "aws_eks_cluster" "petclinic-eks-cluster" {
   version  = var.cluster_version
   role_arn = aws_iam_role.cluster.arn
 
+  access_config {
+    authentication_mode = "API_AND_CONFIG_MAP"
+  }
+
   vpc_config {
     subnet_ids         = var.subnet_ids
     security_group_ids = [aws_security_group.cluster.id]
@@ -111,6 +118,32 @@ resource "aws_eks_cluster" "petclinic-eks-cluster" {
   tags = {
     Environment = "production"
   }
+}
+
+resource "aws_eks_access_entry" "cluster_admins" {
+  for_each = local.cluster_admin_principal_map
+
+  cluster_name  = aws_eks_cluster.petclinic-eks-cluster.name
+  principal_arn = each.value
+  type          = "STANDARD"
+
+  tags = {
+    Environment = "production"
+  }
+}
+
+resource "aws_eks_access_policy_association" "cluster_admins" {
+  for_each = local.cluster_admin_principal_map
+
+  cluster_name  = aws_eks_cluster.petclinic-eks-cluster.name
+  principal_arn = each.value
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.cluster_admins]
 }
 
 # ─── OIDC Provider (IRSA) ─────────────────────────────────────────────────────
@@ -226,7 +259,7 @@ resource "aws_eks_addon" "ebs_csi_driver" {
   timeouts {
     create = "30m"
   }
-  
+
   tags = {
     Environment = "production"
   }

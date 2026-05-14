@@ -1,15 +1,10 @@
 name: Deploy infrastructure
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "terraform/**"
-      - ".github/workflows/infra.yml"
   push:
     branches:
       - main
+      - ft/app-pipeline
     paths:
       - "terraform/**"
       - ".github/workflows/infra.yml"
@@ -34,6 +29,7 @@ env:
   TF_INPUT: false 
   TF_VERSION: 1.10.5   
   TF_WORKING_DIR: terraform
+  TF_VARS_FILE: environment/dev.tfvars
   AWS_REGION: ${{ secrets.AWS_REGION }}
   AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
   
@@ -58,6 +54,14 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set up kubectl
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy' }}
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Helm
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy' }}
+        uses: azure/setup-helm@v4.3.0
+
 
       - name: Resolve Terraform action
         id: tf_action
@@ -69,18 +73,88 @@ jobs:
           fi
           echo "action=$ACTION" >> "$GITHUB_OUTPUT"
 
-      - name: Guard manual apply and destroy
-        if: ${{ github.event_name == 'workflow_dispatch' && (steps.tf_action.outputs.action == 'apply' || steps.tf_action.outputs.action == 'destroy') }}
-        shell: bash
-        run: |
-          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
-            echo "Apply and destroy are only allowed from the main branch." >&2
-            exit 1
-          fi
-
       - name: Terraform init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: Pre-destroy Kubernetes and load balancer cleanup
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.tf_action.outputs.action == 'destroy' }}
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CLUSTER_NAME="$(awk -F'"' '/^cluster_name[[:space:]]*=/ { print $2; exit }' "$TF_VARS_FILE")"
+          APP_NAMESPACE="$(awk -F'"' '/^app_namespace[[:space:]]*=/ { print $2; exit }' "$TF_VARS_FILE")"
+          APP_NAMESPACE="${APP_NAMESPACE:-petclinic}"
+          CLUSTER_NAME="${CLUSTER_NAME:-petclinic-eks}"
+
+          if ! aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "Cluster '$CLUSTER_NAME' does not exist or is already gone; skipping Kubernetes cleanup."
+            exit 0
+          fi
+
+          aws eks update-kubeconfig \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+          echo "Deleting Argo CD Applications so their finalizers do not keep app resources alive..."
+          if kubectl get crd applications.argoproj.io >/dev/null 2>&1; then
+            kubectl patch applications.argoproj.io --all \
+              --namespace argocd \
+              --type merge \
+              -p '{"metadata":{"finalizers":[]}}' || true
+            kubectl delete applications.argoproj.io --all \
+              --namespace argocd \
+              --ignore-not-found \
+              --timeout=120s || true
+          fi
+
+          echo "Deleting application Helm releases..."
+          for namespace in "$APP_NAMESPACE" petclinic petclinic-prod; do
+            if kubectl get namespace "$namespace" >/dev/null 2>&1; then
+              helm list --namespace "$namespace" --short 2>/dev/null | xargs -r -n1 helm uninstall --namespace "$namespace" || true
+            fi
+          done
+
+          echo "Deleting services and ingresses that may own AWS load balancers..."
+          for namespace in "$APP_NAMESPACE" petclinic petclinic-prod; do
+            if kubectl get namespace "$namespace" >/dev/null 2>&1; then
+              kubectl delete ingress --all --namespace "$namespace" --ignore-not-found --timeout=120s || true
+              kubectl delete service --all --namespace "$namespace" --ignore-not-found --timeout=120s || true
+            fi
+          done
+
+          for namespace in monitoring argocd; do
+            if kubectl get namespace "$namespace" >/dev/null 2>&1; then
+              kubectl delete ingress --all --namespace "$namespace" --ignore-not-found --timeout=120s || true
+              kubectl get service --namespace "$namespace" -o name 2>/dev/null \
+                | xargs -r kubectl delete --namespace "$namespace" --ignore-not-found --timeout=120s || true
+            fi
+          done
+
+          echo "Waiting for Kubernetes-owned AWS load balancers to disappear..."
+          for _ in $(seq 1 60); do
+            LB_COUNT="$(aws elbv2 describe-load-balancers \
+              --region "$AWS_REGION" \
+              --query "length(LoadBalancers[?contains(LoadBalancerName, 'k8s') || contains(LoadBalancerName, 'petclinic')])" \
+              --output text 2>/dev/null || echo 0)"
+
+            CLASSIC_LB_COUNT="$(aws elb describe-load-balancers \
+              --region "$AWS_REGION" \
+              --query "length(LoadBalancerDescriptions[?contains(LoadBalancerName, 'k8s') || contains(LoadBalancerName, 'petclinic')])" \
+              --output text 2>/dev/null || echo 0)"
+
+            if [ "${LB_COUNT:-0}" = "0" ] && [ "${CLASSIC_LB_COUNT:-0}" = "0" ]; then
+              echo "No matching Kubernetes load balancers remain."
+              exit 0
+            fi
+
+            echo "Still waiting for load balancers: elbv2=${LB_COUNT:-0}, classic=${CLASSIC_LB_COUNT:-0}"
+            sleep 10
+          done
+
+          echo "Timed out waiting for load balancers to disappear; Terraform destroy will continue and report any remaining blockers."
 
       - name: Format Terraform files
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -95,9 +169,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ steps.tf_action.outputs.action }}" = "destroy" ]; then
-            terraform plan -destroy -input=false -no-color -lock-timeout=5m -out=tfplan
+            terraform plan -destroy -input=false -no-color -lock-timeout=5m -var-file="${TF_VARS_FILE}" -out=tfplan
           else
-            terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+            terraform plan -input=false -no-color -lock-timeout=5m -var-file="${TF_VARS_FILE}" -out=tfplan
           fi
 
       - name: Terraform apply
@@ -118,6 +192,7 @@ jobs:
             echo "### Deploy infrastructure workflow"
             echo "- Action: \`${{ steps.tf_action.outputs.action }}\`"
             echo "- Working directory: \`${{ env.TF_WORKING_DIR }}\`"
+            echo "- Variable file: \`${{ env.TF_WORKING_DIR }}/${{ env.TF_VARS_FILE }}\`"
             echo "- AWS region: \`${{ env.AWS_REGION }}\`"
             echo "- Backend config file: \`terraform/backend.hcl\`"
           } >> "$GITHUB_STEP_SUMMARY"

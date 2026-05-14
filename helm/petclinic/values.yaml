@@ -1,6 +1,33 @@
 image:
-  registry: 139561979448.dkr.ecr.us-east-1.amazonaws.com
-  tag: 440a8a7ba41a14445e8105394c998fbad8049f82
+  registry: 536697234487.dkr.ecr.us-east-1.amazonaws.com
+  repositoryPrefix: petclinic-dev
+  tag: 19039bd
+
+exposure:
+  apiGatewayServiceType: ClusterIP
+
+ingress:
+  enabled: false
+  className: alb
+  host: ""
+  certificateArn: ""
+  annotations:
+    alb.ingress.kubernetes.io/load-balancer-name: petclinic-alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+externalSecret:
+  enabled: true
+  refreshInterval: 1h
+  secretStoreName: aws-secrets-manager
+  targetSecretName: mysql-secret
+  remoteSecretName: petclinic/database-credentials
+
+monitoring:
+  podMonitor:
+    enabled: true
 
 services:
   config-server:

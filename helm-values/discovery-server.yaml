@@ -1,0 +1,19 @@
+image:
+  tag: 19039bd
+
+service:
+  name: discovery-server
+  port: 8761
+  targetPort: http
+
+container:
+  port: 8761
+
+spring:
+  profiles: docker
+
+dependencies:
+  configServer:
+    enabled: true
+  discoveryServer:
+    enabled: false

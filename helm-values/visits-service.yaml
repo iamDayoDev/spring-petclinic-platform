@@ -1,0 +1,22 @@
+image:
+  tag: 19039bd
+
+service:
+  name: visits-service
+  port: 8082
+  targetPort: http
+
+container:
+  port: 8082
+
+spring:
+  profiles: docker,mysql
+
+dependencies:
+  configServer:
+    enabled: true
+  discoveryServer:
+    enabled: true
+
+mysql:
+  enabled: true

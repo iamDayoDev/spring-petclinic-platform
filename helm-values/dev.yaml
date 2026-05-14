@@ -1,0 +1,27 @@
+image:
+  registry: 536697234487.dkr.ecr.us-east-1.amazonaws.com
+  repositoryPrefix: petclinic-dev
+  tag: ""
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+
+metrics:
+  enabled: true
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 250m
+  limits:
+    memory: 512Mi
+    cpu: 500m
+
+autoscaling:
+  enabled: false
+
+pdb:
+  enabled: false

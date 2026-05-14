@@ -1,0 +1,19 @@
+image:
+  tag: 19039bd
+
+service:
+  name: api-gateway
+  port: 80
+  targetPort: http
+
+container:
+  port: 8080
+
+spring:
+  profiles: docker
+
+dependencies:
+  configServer:
+    enabled: true
+  discoveryServer:
+    enabled: false

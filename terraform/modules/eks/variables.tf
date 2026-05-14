@@ -10,6 +10,12 @@ variable "cluster_version" {
   default     = "1.32"
 }
 
+variable "cluster_admin_principal_arns" {
+  description = "IAM principal ARNs to grant cluster-admin access to EKS via access entries"
+  type        = set(string)
+  default     = []
+}
+
 variable "vpc_id" {
   description = "ID of the VPC where the cluster is deployed"
   type        = string

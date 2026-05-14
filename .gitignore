@@ -4,7 +4,6 @@
 *.tfstate.backup
 *.tfstate.lock.info
 .terraform.lock.hcl
-*.tfvars
 override.tf
 override.tf.json
 *_override.tf
@@ -28,6 +27,8 @@ Thumbs.db
 # Helm
 *.tgz
 charts/
+!terraform/modules/addons/charts/
+!terraform/modules/addons/charts/**
 
 # Temp files
 /tmp/

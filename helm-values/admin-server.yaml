@@ -1,0 +1,19 @@
+image:
+  tag: 19039bd
+
+service:
+  name: admin-server
+  port: 9090
+  targetPort: http
+
+container:
+  port: 9090
+
+spring:
+  profiles: docker
+
+dependencies:
+  configServer:
+    enabled: true
+  discoveryServer:
+    enabled: false

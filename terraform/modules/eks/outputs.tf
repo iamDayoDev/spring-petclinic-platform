@@ -22,3 +22,8 @@ output "oidc_provider_arn" {
   description = "ARN of the OIDC identity provider (for IRSA)"
   value       = aws_iam_openid_connect_provider.oidc_provider.arn
 }
+
+output "oidc_provider_url" {
+  description = "URL of the OIDC identity provider (for IRSA)"
+  value       = aws_iam_openid_connect_provider.oidc_provider.url
+}

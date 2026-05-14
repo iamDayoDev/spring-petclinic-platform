@@ -12,3 +12,14 @@ variable "services" {
     "genai-service",
   ]
 }
+
+variable "repository_prefix" {
+  description = "Prefix applied to each ECR repository name"
+  type        = string
+  default     = ""
+}
+
+variable "environment" {
+  description = "Environment tag applied to ECR resources"
+  type        = string
+}

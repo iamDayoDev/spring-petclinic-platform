@@ -1,0 +1,120 @@
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+image:
+  registry: ""
+  repositoryPrefix: ""
+  repository: ""
+  tag: ""
+  pullPolicy: Always
+
+service:
+  name: ""
+  type: ClusterIP
+  port: 8080
+  targetPort: http
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: alb
+  host: ""
+  certificateArn: ""
+  path: /
+  pathType: Prefix
+  annotations:
+    alb.ingress.kubernetes.io/load-balancer-name: petclinic-alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+container:
+  port: 8080
+
+spring:
+  profiles: docker
+
+dependencies:
+  waitImage: busybox:1.36
+  waitIntervalSeconds: 3
+  configServer:
+    enabled: true
+    url: http://config-server:8888/actuator/health
+  discoveryServer:
+    enabled: false
+    url: http://discovery-server:8761/actuator/health
+
+mysql:
+  enabled: false
+  secretName: mysql-secret
+  hostKey: MYSQL_HOST
+  userKey: MYSQL_USER
+  passwordKey: MYSQL_PASSWORD
+  databaseKey: MYSQL_DATABASE
+  port: 3306
+  datasourceUrl: "jdbc:mysql://$(MYSQL_HOST):3306/$(MYSQL_DATABASE)?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+
+openai:
+  enabled: false
+  secretName: openai-secret
+  key: SPRING_AI_OPENAI_API_KEY
+  envName: SPRING_AI_OPENAI_API_KEY
+
+env: []
+envFrom: []
+
+configMap:
+  enabled: false
+  data: {}
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+
+metrics:
+  enabled: true
+  path: /actuator/prometheus
+  podMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      release: monitoring
+
+probes:
+  readiness:
+    enabled: true
+    path: /actuator/health
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 6
+  liveness:
+    enabled: true
+    path: /actuator/health
+    initialDelaySeconds: 60
+    periodSeconds: 15
+    failureThreshold: 3
+
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 250m
+  limits:
+    memory: 512Mi
+    cpu: 500m
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""

@@ -1,0 +1,22 @@
+image:
+  tag: 19039bd
+
+service:
+  name: genai-service
+  port: 8084
+  targetPort: http
+
+container:
+  port: 8084
+
+spring:
+  profiles: docker
+
+dependencies:
+  configServer:
+    enabled: true
+  discoveryServer:
+    enabled: true
+
+openai:
+  enabled: true
