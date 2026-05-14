@@ -1,8 +1,7 @@
 aws_region  = "us-east-1"
 environment = "dev"
 
-# github_owner = ["Achievers11-DevOps", "iamDayoDev"]
-github_owner = ["iamDayoDev"]
+github_owner = ["Achievers11-DevOps"]
 github_repositories = [
   "petclinic-k8s-platform",
   "petclinic-microservices",
