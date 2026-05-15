@@ -313,7 +313,7 @@ jobs:
               argocd.argoproj.io/secret-type: repository
           stringData:
             type: git
-            url: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
+            url: https://github.com/iamDayoDev/spring-petclinic-platform.git
             username: x-access-token
             password: ${ARGOCD_REPO_TOKEN}
           EOF

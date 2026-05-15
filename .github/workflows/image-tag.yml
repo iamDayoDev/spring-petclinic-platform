@@ -9,6 +9,10 @@ permissions:
   contents: write
   id-token: write
 
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+
 jobs:
   update-tag:
     name: Update service image tag
@@ -26,6 +30,14 @@ jobs:
         with:
           token: ${{ secrets.GITOPS_PAT }}
           ref: main
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: gha-image-tag-${{ github.run_id }}
+          unset-current-credentials: true
 
       - name: Configure Git identity
         run: |
@@ -60,6 +72,7 @@ jobs:
 
           UPDATED_SERVICES=""
           DEPLOY_MATRIX_ITEMS=()
+          TARGETS=""
 
           for raw_service in ${SERVICE_LIST//,/ }; do
             SERVICE_ENV="${DEPLOY_ENVIRONMENT:-}"
@@ -103,6 +116,31 @@ jobs:
 
             UPDATED_SERVICES="${UPDATED_SERVICES} ${SERVICE}"
             DEPLOY_MATRIX_ITEMS+=("{\"service\":\"${SERVICE}\",\"environment\":\"${SERVICE_ENV}\"}")
+
+            ENV_VALUES_FILE="helm-values/${SERVICE_ENV}.yaml"
+
+            if [ ! -f "${ENV_VALUES_FILE}" ]; then
+              echo "Environment values file not found: ${ENV_VALUES_FILE}" >&2
+              exit 1
+            fi
+
+            REPOSITORY_PREFIX="$(awk '
+              /^image:/ { in_image=1; next }
+              in_image && /^[^[:space:]]/ { exit }
+              in_image && /^[[:space:]]*repositoryPrefix:/ {
+                sub(/^[[:space:]]*repositoryPrefix:[[:space:]]*/, "", $0)
+                gsub(/"/, "", $0)
+                print $0
+                exit
+              }
+            ' "${ENV_VALUES_FILE}")"
+
+            if [ -z "${REPOSITORY_PREFIX}" ]; then
+              echo "Unable to resolve image.repositoryPrefix from ${ENV_VALUES_FILE}" >&2
+              exit 1
+            fi
+
+            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}:${REPOSITORY_PREFIX}"$'\n'
           done
 
           git diff -- helm-values/
@@ -115,7 +153,46 @@ jobs:
             echo "source_repository=${SOURCE_REPOSITORY}"
             echo "source_sha=${SOURCE_SHA}"
             echo "deploy_matrix=${DEPLOY_MATRIX}"
+            echo "targets<<EOF"
+            printf '%s' "${TARGETS}"
+            echo
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Wait for images in ECR
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
+          TARGETS: ${{ steps.context.outputs.targets }}
+        run: |
+          set -euo pipefail
+
+          while IFS=: read -r SERVICE SERVICE_ENV REPOSITORY_PREFIX; do
+            if [ -z "${SERVICE:-}" ]; then
+              continue
+            fi
+
+            REPOSITORY_NAME="${REPOSITORY_PREFIX}-${SERVICE}"
+            echo "Waiting for ECR image ${REPOSITORY_NAME}:${IMAGE_TAG}"
+
+            FOUND="false"
+            for _ in $(seq 1 30); do
+              if aws ecr describe-images \
+                --repository-name "${REPOSITORY_NAME}" \
+                --image-ids imageTag="${IMAGE_TAG}" \
+                --region "${AWS_REGION}" >/dev/null 2>&1; then
+                FOUND="true"
+                break
+              fi
+
+              sleep 10
+            done
+
+            if [ "${FOUND}" != "true" ]; then
+              echo "ECR image not found after waiting: ${REPOSITORY_NAME}:${IMAGE_TAG}" >&2
+              exit 1
+            fi
+          done <<< "${TARGETS}"
 
       - name: Commit updated tag
         id: commit

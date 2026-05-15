@@ -10,7 +10,7 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
       targetRevision: main
       path: helm/petclinic-service
       helm:
@@ -18,7 +18,7 @@ spec:
         valueFiles:
           - $values/helm-values/prod.yaml
           - $values/helm-values/visits-service.yaml
-    - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
       targetRevision: main
       ref: values
   destination:
