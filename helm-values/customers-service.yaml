@@ -1,5 +1,5 @@
 image:
-  tag: "bc825ec"
+  tag: "4c0d043"
 
 service:
   name: customers-service
