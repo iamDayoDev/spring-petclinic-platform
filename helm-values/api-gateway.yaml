@@ -16,4 +16,4 @@ dependencies:
   configServer:
     enabled: true
   discoveryServer:
-    enabled: false
+    enabled: true
