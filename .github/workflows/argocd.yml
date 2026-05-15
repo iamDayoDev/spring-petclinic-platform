@@ -37,6 +37,38 @@ on:
         description: "Optional source SHA for summary output."
         required: false
         type: string
+  workflow_call:
+    inputs:
+      service:
+        description: "Petclinic service to refresh in Argo CD."
+        required: true
+        type: string
+      environment:
+        description: "Argo CD application environment."
+        required: false
+        default: dev
+        type: string
+      image_tag:
+        description: "Optional image tag to verify against helm-values/<service>.yaml."
+        required: false
+        type: string
+      source_repository:
+        description: "Optional source repository for summary output."
+        required: false
+        type: string
+      source_sha:
+        description: "Optional source SHA for summary output."
+        required: false
+        type: string
+    secrets:
+      AWS_REGION:
+        required: true
+      AWS_ROLE_ARN:
+        required: true
+      OPENAI_API_KEY:
+        required: true
+      ARGOCD_REPO_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -260,12 +292,16 @@ jobs:
           kubectl rollout status deployment/argocd-server --namespace "$ARGOCD_NAMESPACE" --timeout=10m
 
       - name: Create or update Argo CD repository credential
-        if: ${{ secrets.ARGOCD_REPO_TOKEN != '' }}
         shell: bash
         env:
           ARGOCD_REPO_TOKEN: ${{ secrets.ARGOCD_REPO_TOKEN }}
         run: |
           set -euo pipefail
+
+          if [ -z "${ARGOCD_REPO_TOKEN:-}" ]; then
+            echo "ARGOCD_REPO_TOKEN is not set; skipping Argo CD repository credential creation."
+            exit 0
+          fi
 
           kubectl apply -f - <<EOF
           apiVersion: v1
