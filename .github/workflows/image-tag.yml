@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+env:
+  DEV_GITOPS_BRANCH: ${{ vars.DEV_GITOPS_BRANCH || 'ft/app-pipeline' }}
+  PROD_GITOPS_BRANCH: ${{ vars.PROD_GITOPS_BRANCH || 'main' }}
+
 jobs:
   update-tag:
     name: Update service image tag
@@ -18,13 +22,14 @@ jobs:
         with:
           token: ${{ secrets.GITOPS_PAT }}
           ref: main
+          fetch-depth: 0
 
       - name: Configure Git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Update service values file
+      - name: Resolve GitOps context
         id: context
         shell: bash
         env:
@@ -32,6 +37,8 @@ jobs:
           SERVICES: ${{ github.event.client_payload.services || '' }}
           IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.sha }}
           DEPLOY_ENVIRONMENT: ${{ github.event.client_payload.environment || '' }}
+          DEV_GITOPS_BRANCH: ${{ env.DEV_GITOPS_BRANCH }}
+          PROD_GITOPS_BRANCH: ${{ env.PROD_GITOPS_BRANCH }}
         run: |
           set -euo pipefail
 
@@ -50,6 +57,7 @@ jobs:
 
           UPDATED_SERVICES=""
           TARGETS=""
+          RESOLVED_ENV=""
 
           for raw_service in ${SERVICE_LIST//,/ }; do
             SERVICE_ENV="${DEPLOY_ENVIRONMENT:-}"
@@ -64,22 +72,86 @@ jobs:
             esac
 
             SERVICE_ENV="${SERVICE_ENV:-dev}"
+
+            if [ -n "$RESOLVED_ENV" ] && [ "$RESOLVED_ENV" != "$SERVICE_ENV" ]; then
+              echo "This workflow run resolved multiple environments ($RESOLVED_ENV and $SERVICE_ENV)." >&2
+              echo "Dispatch one environment per run so the image tag is committed to a single GitOps branch." >&2
+              exit 1
+            fi
+
+            RESOLVED_ENV="$SERVICE_ENV"
             SERVICE="${raw_service#petclinic-dev-}"
             SERVICE="${SERVICE#petclinic-prod-}"
 
             case "${SERVICE}" in
               admin-server|api-gateway|config-server|customers-service|discovery-server|genai-service|vets-service|visits-service)
                 ;;
-              *)
-                echo "Unsupported service: ${SERVICE}"
-                exit 1
-                ;;
+            *)
+              echo "Unsupported service: ${SERVICE}"
+              exit 1
+              ;;
             esac
 
-            values_file="helm-values/${SERVICE}.yaml"
+            UPDATED_SERVICES="${UPDATED_SERVICES} ${SERVICE}"
+            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}"$'\n'
+          done
+
+          case "${RESOLVED_ENV:-dev}" in
+            dev)
+              TARGET_BRANCH="$DEV_GITOPS_BRANCH"
+              ;;
+            prod)
+              TARGET_BRANCH="$PROD_GITOPS_BRANCH"
+              ;;
+            *)
+              echo "Unsupported environment: ${RESOLVED_ENV}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -z "${TARGET_BRANCH}" ]; then
+            echo "Resolved GitOps branch is empty for environment ${RESOLVED_ENV}." >&2
+            exit 1
+          fi
+
+          {
+            echo "services=${UPDATED_SERVICES# }"
+            echo "image_tag=${IMAGE_TAG}"
+            echo "deploy_env=${RESOLVED_ENV:-dev}"
+            echo "target_branch=${TARGET_BRANCH}"
+            echo "targets<<EOF"
+            printf '%s' "${TARGETS}"
+            echo
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout target GitOps branch
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
+        run: |
+          set -euo pipefail
+
+          if git ls-remote --exit-code --heads origin "$TARGET_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$TARGET_BRANCH"
+            git checkout -B "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
+          else
+            git checkout -B "$TARGET_BRANCH"
+          fi
+
+      - name: Update service values files
+        shell: bash
+        env:
+          SERVICES: ${{ steps.context.outputs.services }}
+          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          for service in $SERVICES; do
+            values_file="helm-values/${service}.yaml"
 
             if [ ! -f "${values_file}" ]; then
-              echo "Values file not found: ${values_file}"
+              echo "Values file not found: ${values_file}" >&2
               exit 1
             fi
 
@@ -87,24 +159,12 @@ jobs:
             sed -i -E "/^image:/,/^[^[:space:]]/ s|^([[:space:]]*tag:).*|\1 \"${IMAGE_TAG}\"|" "${values_file}"
 
             if ! grep -Fq "  tag: \"${IMAGE_TAG}\"" "${values_file}"; then
-              echo "Failed to update image.tag in ${values_file}"
+              echo "Failed to update image.tag in ${values_file}" >&2
               exit 1
             fi
-
-            UPDATED_SERVICES="${UPDATED_SERVICES} ${SERVICE}"
-            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}"$'\n'
           done
 
           git diff -- helm-values/
-
-          {
-            echo "services=${UPDATED_SERVICES# }"
-            echo "image_tag=${IMAGE_TAG}"
-            echo "targets<<EOF"
-            printf '%s' "${TARGETS}"
-            echo
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Commit updated tag
         id: commit
@@ -112,6 +172,7 @@ jobs:
         env:
           SERVICES: ${{ steps.context.outputs.services }}
           IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
+          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
         run: |
           set -euo pipefail
 
@@ -124,7 +185,7 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: update service image tags to ${IMAGE_TAG}"
-            git push origin main
+            git push origin "HEAD:${TARGET_BRANCH}"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -133,6 +194,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           TARGETS: ${{ steps.context.outputs.targets }}
+          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
           IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
           SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
           SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
@@ -153,7 +215,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 workflow_id: 'argocd.yml',
-                ref: 'main',
+                ref: process.env.TARGET_BRANCH,
                 inputs: {
                   service,
                   environment,

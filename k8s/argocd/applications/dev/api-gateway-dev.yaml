@@ -11,7 +11,7 @@ spec:
   project: default
   sources:
     - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
-      targetRevision: main
+      targetRevision: ft/app-pipeline
       path: helm/petclinic-service
       helm:
         releaseName: api-gateway
@@ -24,7 +24,7 @@ spec:
           - name: ingress.enabled
             value: "false"
     - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
-      targetRevision: main
+      targetRevision: ft/app-pipeline
       ref: values
   destination:
     server: https://kubernetes.default.svc

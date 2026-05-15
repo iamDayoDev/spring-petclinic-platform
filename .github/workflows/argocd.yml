@@ -47,6 +47,8 @@ env:
   CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
   ARGOCD_NAMESPACE: argocd
   INSTALL_KUSTOMIZATION: k8s/argocd/install
+  DEV_GITOPS_BRANCH: ${{ vars.DEV_GITOPS_BRANCH || 'ft/app-pipeline' }}
+  PROD_GITOPS_BRANCH: ${{ vars.PROD_GITOPS_BRANCH || 'main' }}
 
 jobs:
   apply:
@@ -57,7 +59,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
@@ -79,6 +81,9 @@ jobs:
           INPUT_IMAGE_TAG: ${{ inputs.image_tag || '' }}
           INPUT_SOURCE_REPOSITORY: ${{ inputs.source_repository || '' }}
           INPUT_SOURCE_SHA: ${{ inputs.source_sha || '' }}
+          DEV_GITOPS_BRANCH: ${{ env.DEV_GITOPS_BRANCH }}
+          PROD_GITOPS_BRANCH: ${{ env.PROD_GITOPS_BRANCH }}
+          CURRENT_GITOPS_BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
@@ -87,6 +92,7 @@ jobs:
           EXPECTED_IMAGE_TAG="$INPUT_IMAGE_TAG"
           SOURCE_REPOSITORY="$INPUT_SOURCE_REPOSITORY"
           SOURCE_SHA="$INPUT_SOURCE_SHA"
+          GITOPS_BRANCH="$CURRENT_GITOPS_BRANCH"
 
           case "$SERVICE" in
             admin-server|api-gateway|config-server|customers-service|discovery-server|genai-service|vets-service|visits-service)
@@ -100,15 +106,22 @@ jobs:
           case "$DEPLOY_ENV" in
             dev)
               APP_NAMESPACE="petclinic"
+              EXPECTED_BRANCH="$DEV_GITOPS_BRANCH"
               ;;
             prod)
               APP_NAMESPACE="petclinic-prod"
+              EXPECTED_BRANCH="$PROD_GITOPS_BRANCH"
               ;;
             *)
               echo "Unsupported environment: $DEPLOY_ENV" >&2
               exit 1
               ;;
           esac
+
+          if [ "$GITOPS_BRANCH" != "$EXPECTED_BRANCH" ]; then
+            echo "Environment '$DEPLOY_ENV' must run from GitOps branch '$EXPECTED_BRANCH', but this workflow is running from '$GITOPS_BRANCH'." >&2
+            exit 1
+          fi
 
           ENV_VALUES_FILE="helm-values/${DEPLOY_ENV}.yaml"
           SERVICE_VALUES_FILE="helm-values/${SERVICE}.yaml"
@@ -153,7 +166,7 @@ jobs:
 
           if [ -n "$EXPECTED_IMAGE_TAG" ] && [ "$EXPECTED_IMAGE_TAG" != "$ACTUAL_IMAGE_TAG" ]; then
             echo "Expected image tag '$EXPECTED_IMAGE_TAG' but $SERVICE_VALUES_FILE contains '$ACTUAL_IMAGE_TAG'." >&2
-            echo "Make sure image-tag.yml pushed the manifest change to main before dispatching Argo CD." >&2
+            echo "Make sure image-tag.yml pushed the manifest change to branch '$GITOPS_BRANCH' before dispatching Argo CD." >&2
             exit 1
           fi
 
@@ -171,6 +184,7 @@ jobs:
             echo "secrets_application_name=$SECRETS_APPLICATION_NAME"
             echo "cluster_secret_store=$CLUSTER_SECRET_STORE"
             echo "image_tag=$ACTUAL_IMAGE_TAG"
+            echo "gitops_branch=$GITOPS_BRANCH"
             echo "source_repository=$SOURCE_REPOSITORY"
             echo "source_sha=$SOURCE_SHA"
           } >> "$GITHUB_OUTPUT"
@@ -346,6 +360,7 @@ jobs:
             echo "- Argo CD namespace: \`$ARGOCD_NAMESPACE\`"
             echo "- App namespace: \`${{ steps.context.outputs.app_namespace }}\`"
             echo "- Environment: \`${{ steps.context.outputs.deploy_env }}\`"
+            echo "- GitOps branch: \`${{ steps.context.outputs.gitops_branch }}\`"
             echo "- Service: \`${{ steps.context.outputs.service }}\`"
             echo "- Image tag from Git: \`${{ steps.context.outputs.image_tag }}\`"
             echo "- Install step: \`${{ steps.install.outputs.action || 'completed' }}\`"

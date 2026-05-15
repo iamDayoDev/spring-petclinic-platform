@@ -11,7 +11,7 @@ spec:
   project: default
   sources:
     - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
-      targetRevision: main
+      targetRevision: ft/app-pipeline
       path: helm/petclinic-service
       helm:
         releaseName: visits-service
@@ -19,7 +19,7 @@ spec:
           - $values/helm-values/dev.yaml
           - $values/helm-values/visits-service.yaml
     - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
-      targetRevision: main
+      targetRevision: ft/app-pipeline
       ref: values
   destination:
     server: https://kubernetes.default.svc
