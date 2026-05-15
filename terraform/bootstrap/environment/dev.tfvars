@@ -3,10 +3,10 @@ environment = "dev"
 
 github_owner = ["Achievers11-DevOps"]
 github_repositories = [
-  # "petclinic-k8s-platform",
-  # "petclinic-microservices",
-  "spring-petclinic-microservices",
-  "spring-petclinic-platform",
+  "petclinic-k8s-platform",
+  "petclinic-microservices",
+  # "spring-petclinic-microservices",
+  # "spring-petclinic-platform",
  
 ]
 
