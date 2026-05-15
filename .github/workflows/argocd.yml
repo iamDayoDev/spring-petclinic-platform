@@ -1,3 +1,4 @@
+# Argo CD Application Manifests Workflow
 name: Apply Argo CD Manifests
 
 on:
