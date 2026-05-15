@@ -65,6 +65,8 @@ on:
         required: true
       AWS_ROLE_ARN:
         required: true
+      GITOPS_PAT:
+        required: true
       OPENAI_API_KEY:
         required: true
       ARGOCD_REPO_TOKEN:
@@ -80,6 +82,8 @@ env:
   CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
   ARGOCD_NAMESPACE: argocd
   INSTALL_KUSTOMIZATION: k8s/argocd/install
+  GITOPS_REPOSITORY: iamDayoDev/spring-petclinic-platform
+  GITOPS_REPO_URL: https://github.com/iamDayoDev/spring-petclinic-platform.git
 
 jobs:
   apply:
@@ -87,9 +91,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout GitOps repo
         uses: actions/checkout@v4
         with:
+          repository: ${{ env.GITOPS_REPOSITORY }}
+          token: ${{ secrets.GITOPS_PAT }}
           ref: main
 
       - name: Set up kubectl
@@ -313,7 +319,7 @@ jobs:
               argocd.argoproj.io/secret-type: repository
           stringData:
             type: git
-            url: https://github.com/iamDayoDev/spring-petclinic-platform.git
+            url: ${GITOPS_REPO_URL}
             username: x-access-token
             password: ${ARGOCD_REPO_TOKEN}
           EOF
