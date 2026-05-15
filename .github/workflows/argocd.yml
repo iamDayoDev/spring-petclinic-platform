@@ -1,0 +1,357 @@
+name: Apply Argo CD Manifests
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Petclinic service to refresh in Argo CD."
+        required: true
+        type: choice
+        options:
+          - admin-server
+          - api-gateway
+          - config-server
+          - customers-service
+          - discovery-server
+          - genai-service
+          - vets-service
+          - visits-service
+      environment:
+        description: "Argo CD application environment."
+        required: false
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+      image_tag:
+        description: "Optional image tag to verify against helm-values/<service>.yaml."
+        required: false
+        type: string
+      source_repository:
+        description: "Optional source repository for summary output."
+        required: false
+        type: string
+      source_sha:
+        description: "Optional source SHA for summary output."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+  CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+  ARGOCD_NAMESPACE: argocd
+  INSTALL_KUSTOMIZATION: k8s/argocd/install
+
+jobs:
+  apply:
+    name: Apply Argo CD manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: gha-argocd-${{ github.run_id }}
+          unset-current-credentials: true
+
+      - name: Resolve deploy context
+        id: context
+        shell: bash
+        env:
+          INPUT_SERVICE: ${{ inputs.service }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment || 'dev' }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag || '' }}
+          INPUT_SOURCE_REPOSITORY: ${{ inputs.source_repository || '' }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha || '' }}
+        run: |
+          set -euo pipefail
+
+          SERVICE="$INPUT_SERVICE"
+          DEPLOY_ENV="${INPUT_ENVIRONMENT:-dev}"
+          EXPECTED_IMAGE_TAG="$INPUT_IMAGE_TAG"
+          SOURCE_REPOSITORY="$INPUT_SOURCE_REPOSITORY"
+          SOURCE_SHA="$INPUT_SOURCE_SHA"
+
+          case "$SERVICE" in
+            admin-server|api-gateway|config-server|customers-service|discovery-server|genai-service|vets-service|visits-service)
+              ;;
+            *)
+              echo "Unsupported or empty service: $SERVICE" >&2
+              exit 1
+              ;;
+          esac
+
+          case "$DEPLOY_ENV" in
+            dev)
+              APP_NAMESPACE="petclinic"
+              ;;
+            prod)
+              APP_NAMESPACE="petclinic-prod"
+              ;;
+            *)
+              echo "Unsupported environment: $DEPLOY_ENV" >&2
+              exit 1
+              ;;
+          esac
+
+          ENV_VALUES_FILE="helm-values/${DEPLOY_ENV}.yaml"
+          SERVICE_VALUES_FILE="helm-values/${SERVICE}.yaml"
+          SECRETS_VALUES_FILE="helm-values/secrets-${DEPLOY_ENV}.yaml"
+          APPLICATIONS_KUSTOMIZATION="k8s/argocd/applications/${DEPLOY_ENV}"
+          SERVICE_APPLICATION_MANIFEST="${APPLICATIONS_KUSTOMIZATION}/${SERVICE}-${DEPLOY_ENV}.yaml"
+          SECRETS_APPLICATION_MANIFEST="${APPLICATIONS_KUSTOMIZATION}/petclinic-secrets-${DEPLOY_ENV}.yaml"
+          SERVICE_APPLICATION_NAME="${SERVICE}-${DEPLOY_ENV}"
+          SECRETS_APPLICATION_NAME="petclinic-secrets-${DEPLOY_ENV}"
+
+          for path in \
+            "$ENV_VALUES_FILE" \
+            "$SERVICE_VALUES_FILE" \
+            "$SECRETS_VALUES_FILE" \
+            "${INSTALL_KUSTOMIZATION}/kustomization.yaml" \
+            "${APPLICATIONS_KUSTOMIZATION}/kustomization.yaml" \
+            "$SERVICE_APPLICATION_MANIFEST" \
+            "$SECRETS_APPLICATION_MANIFEST"
+          do
+            if [ ! -f "$path" ]; then
+              echo "Required file not found: $path" >&2
+              exit 1
+            fi
+          done
+
+          CLUSTER_SECRET_STORE="$(awk '/^[[:space:]]*secretStoreName:/ { print $2; exit }' "$SECRETS_VALUES_FILE")"
+          ACTUAL_IMAGE_TAG="$(awk '
+            /^image:/ { in_image=1; next }
+            in_image && /^[^[:space:]]/ { exit }
+            in_image && /^[[:space:]]*tag:/ {
+              sub(/^[[:space:]]*tag:[[:space:]]*/, "", $0)
+              gsub(/"/, "", $0)
+              print $0
+              exit
+            }
+          ' "$SERVICE_VALUES_FILE")"
+
+          if [ -z "$ACTUAL_IMAGE_TAG" ]; then
+            echo "No image.tag found in $SERVICE_VALUES_FILE." >&2
+            exit 1
+          fi
+
+          if [ -n "$EXPECTED_IMAGE_TAG" ] && [ "$EXPECTED_IMAGE_TAG" != "$ACTUAL_IMAGE_TAG" ]; then
+            echo "Expected image tag '$EXPECTED_IMAGE_TAG' but $SERVICE_VALUES_FILE contains '$ACTUAL_IMAGE_TAG'." >&2
+            echo "Make sure image-tag.yml pushed the manifest change to main before dispatching Argo CD." >&2
+            exit 1
+          fi
+
+          {
+            echo "service=$SERVICE"
+            echo "deploy_env=$DEPLOY_ENV"
+            echo "app_namespace=$APP_NAMESPACE"
+            echo "env_values_file=$ENV_VALUES_FILE"
+            echo "service_values_file=$SERVICE_VALUES_FILE"
+            echo "secrets_values_file=$SECRETS_VALUES_FILE"
+            echo "applications_kustomization=$APPLICATIONS_KUSTOMIZATION"
+            echo "service_application_manifest=$SERVICE_APPLICATION_MANIFEST"
+            echo "secrets_application_manifest=$SECRETS_APPLICATION_MANIFEST"
+            echo "service_application_name=$SERVICE_APPLICATION_NAME"
+            echo "secrets_application_name=$SECRETS_APPLICATION_NAME"
+            echo "cluster_secret_store=$CLUSTER_SECRET_STORE"
+            echo "image_tag=$ACTUAL_IMAGE_TAG"
+            echo "source_repository=$SOURCE_REPOSITORY"
+            echo "source_sha=$SOURCE_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update kubeconfig
+        shell: bash
+        run: |
+          aws eks update-kubeconfig \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Validate cluster prerequisites
+        shell: bash
+        env:
+          APP_NAMESPACE: ${{ steps.context.outputs.app_namespace }}
+          CLUSTER_SECRET_STORE: ${{ steps.context.outputs.cluster_secret_store }}
+        run: |
+          set -euo pipefail
+
+          kubectl create namespace "$ARGOCD_NAMESPACE" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          kubectl create namespace "$APP_NAMESPACE" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          if ! kubectl get crd externalsecrets.external-secrets.io >/dev/null 2>&1; then
+            echo "ExternalSecret CRD is missing. Apply the Terraform addons layer first." >&2
+            exit 1
+          fi
+
+          if ! kubectl get crd clustersecretstores.external-secrets.io >/dev/null 2>&1; then
+            echo "ClusterSecretStore CRD is missing. Apply the Terraform addons layer first." >&2
+            exit 1
+          fi
+
+          if ! kubectl get clustersecretstore "$CLUSTER_SECRET_STORE" >/dev/null 2>&1; then
+            echo "ClusterSecretStore '$CLUSTER_SECRET_STORE' is missing. Apply the Terraform addons layer first." >&2
+            exit 1
+          fi
+
+      - name: Create or update OpenAI secret
+        shell: bash
+        env:
+          APP_NAMESPACE: ${{ steps.context.outputs.app_namespace }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "GitHub secret OPENAI_API_KEY is missing or empty." >&2
+            exit 1
+          fi
+
+          kubectl create secret generic openai-secret \
+            --namespace "$APP_NAMESPACE" \
+            --from-literal=SPRING_AI_OPENAI_API_KEY="$OPENAI_API_KEY" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+      - name: Ensure Argo CD control plane exists
+        id: install
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if kubectl get deployment argocd-server --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
+            echo "Argo CD is already present in namespace '$ARGOCD_NAMESPACE'; skipping raw install manifest apply."
+            echo "action=skipped-existing-install" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          kubectl apply -k "$INSTALL_KUSTOMIZATION"
+          echo "action=applied-install-manifests" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for Argo CD to become ready
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl wait --for=condition=Established crd/applications.argoproj.io --timeout=5m
+          kubectl rollout status statefulset/argocd-application-controller --namespace "$ARGOCD_NAMESPACE" --timeout=10m
+          kubectl rollout status deployment/argocd-applicationset-controller --namespace "$ARGOCD_NAMESPACE" --timeout=10m
+          kubectl rollout status deployment/argocd-repo-server --namespace "$ARGOCD_NAMESPACE" --timeout=10m
+          kubectl rollout status deployment/argocd-server --namespace "$ARGOCD_NAMESPACE" --timeout=10m
+
+      - name: Create or update Argo CD repository credential
+        if: ${{ secrets.ARGOCD_REPO_TOKEN != '' }}
+        shell: bash
+        env:
+          ARGOCD_REPO_TOKEN: ${{ secrets.ARGOCD_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: petclinic-platform-repo
+            namespace: ${ARGOCD_NAMESPACE}
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            type: git
+            url: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
+            username: x-access-token
+            password: ${ARGOCD_REPO_TOKEN}
+          EOF
+
+      - name: Apply Argo CD application manifests
+        shell: bash
+        env:
+          APPLICATIONS_KUSTOMIZATION: ${{ steps.context.outputs.applications_kustomization }}
+        run: |
+          set -euo pipefail
+
+          kubectl apply -k "$APPLICATIONS_KUSTOMIZATION"
+
+      - name: Force refresh target applications
+        shell: bash
+        env:
+          SECRETS_APPLICATION_NAME: ${{ steps.context.outputs.secrets_application_name }}
+          SERVICE_APPLICATION_NAME: ${{ steps.context.outputs.service_application_name }}
+        run: |
+          set -euo pipefail
+
+          for app in "$SECRETS_APPLICATION_NAME" "$SERVICE_APPLICATION_NAME"; do
+            kubectl annotate application "$app" \
+              --namespace "$ARGOCD_NAMESPACE" \
+              argocd.argoproj.io/refresh=hard \
+              --overwrite
+          done
+
+      - name: Wait for Argo CD sync
+        shell: bash
+        env:
+          SECRETS_APPLICATION_NAME: ${{ steps.context.outputs.secrets_application_name }}
+          SERVICE_APPLICATION_NAME: ${{ steps.context.outputs.service_application_name }}
+        run: |
+          set -euo pipefail
+
+          wait_for_application() {
+            local app_name="$1"
+
+            for _ in $(seq 1 60); do
+              sync_status="$(kubectl get application "$app_name" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+              health_status="$(kubectl get application "$app_name" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+
+              if [ "$sync_status" = "Synced" ] && [ "$health_status" = "Healthy" ]; then
+                echo "$app_name is Synced and Healthy."
+                return 0
+              fi
+
+              sleep 10
+            done
+
+            kubectl get application "$app_name" --namespace "$ARGOCD_NAMESPACE" -o yaml || true
+            echo "Application '$app_name' did not become Synced and Healthy within the timeout window." >&2
+            return 1
+          }
+
+          wait_for_application "$SECRETS_APPLICATION_NAME"
+          wait_for_application "$SERVICE_APPLICATION_NAME"
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Argo CD manifest apply"
+            echo "- Cluster: \`$CLUSTER_NAME\`"
+            echo "- Argo CD namespace: \`$ARGOCD_NAMESPACE\`"
+            echo "- App namespace: \`${{ steps.context.outputs.app_namespace }}\`"
+            echo "- Environment: \`${{ steps.context.outputs.deploy_env }}\`"
+            echo "- Service: \`${{ steps.context.outputs.service }}\`"
+            echo "- Image tag from Git: \`${{ steps.context.outputs.image_tag }}\`"
+            echo "- Install step: \`${{ steps.install.outputs.action || 'completed' }}\`"
+            echo "- Install kustomization: \`$INSTALL_KUSTOMIZATION\`"
+            echo "- Applied application kustomization: \`${{ steps.context.outputs.applications_kustomization }}\`"
+            echo "- Refreshed applications: \`${{ steps.context.outputs.secrets_application_name }}\`, \`${{ steps.context.outputs.service_application_name }}\`"
+            echo "- Source repository: \`${{ steps.context.outputs.source_repository || github.repository }}\`"
+            echo "- Source SHA: \`${{ steps.context.outputs.source_sha || steps.context.outputs.image_tag }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -31,6 +31,7 @@ jobs:
           SERVICE: ${{ github.event.client_payload.service || github.event.client_payload.service_name || github.event.client_payload.app || github.event.client_payload.repository || github.event.client_payload.repo || '' }}
           SERVICES: ${{ github.event.client_payload.services || '' }}
           IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.sha }}
+          DEPLOY_ENVIRONMENT: ${{ github.event.client_payload.environment || '' }}
         run: |
           set -euo pipefail
 
@@ -48,8 +49,21 @@ jobs:
           fi
 
           UPDATED_SERVICES=""
+          TARGETS=""
 
           for raw_service in ${SERVICE_LIST//,/ }; do
+            SERVICE_ENV="${DEPLOY_ENVIRONMENT:-}"
+
+            case "${raw_service}" in
+              petclinic-prod-*)
+                SERVICE_ENV="prod"
+                ;;
+              petclinic-dev-*)
+                SERVICE_ENV="dev"
+                ;;
+            esac
+
+            SERVICE_ENV="${SERVICE_ENV:-dev}"
             SERVICE="${raw_service#petclinic-dev-}"
             SERVICE="${SERVICE#petclinic-prod-}"
 
@@ -78,12 +92,19 @@ jobs:
             fi
 
             UPDATED_SERVICES="${UPDATED_SERVICES} ${SERVICE}"
+            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}"$'\n'
           done
 
           git diff -- helm-values/
 
-          echo "services=${UPDATED_SERVICES# }" >> "$GITHUB_OUTPUT"
-          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          {
+            echo "services=${UPDATED_SERVICES# }"
+            echo "image_tag=${IMAGE_TAG}"
+            echo "targets<<EOF"
+            printf '%s' "${TARGETS}"
+            echo
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Commit updated tag
         id: commit
@@ -107,29 +128,38 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Trigger deploy workflow
+      - name: Trigger Argo CD workflow
         if: steps.commit.outputs.changed == 'true'
         uses: actions/github-script@v7
         env:
-          SERVICES: ${{ steps.context.outputs.services }}
+          TARGETS: ${{ steps.context.outputs.targets }}
           IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
           SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
           SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
         with:
           github-token: ${{ secrets.GITOPS_PAT }}
           script: |
-            const services = process.env.SERVICES.split(/\s+/).filter(Boolean);
+            const targets = process.env.TARGETS
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean)
+              .map((line) => {
+                const [service, environment] = line.split(':');
+                return { service, environment };
+              });
 
-            for (const service of services) {
-              await github.rest.repos.createDispatchEvent({
+            for (const { service, environment } of targets) {
+              await github.rest.actions.createWorkflowDispatch({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                event_type: 'deploy-helm-chart',
-                client_payload: {
+                workflow_id: 'argocd.yml',
+                ref: 'main',
+                inputs: {
                   service,
+                  environment,
                   image_tag: process.env.IMAGE_TAG,
                   source_repository: process.env.SOURCE_REPOSITORY,
                   source_sha: process.env.SOURCE_SHA
                 }
-              })
+              });
             }
