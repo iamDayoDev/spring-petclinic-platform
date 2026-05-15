@@ -87,6 +87,11 @@ metrics:
       release: monitoring
 
 probes:
+  startup:
+    enabled: false
+    path: /actuator/health
+    periodSeconds: 10
+    failureThreshold: 30
   readiness:
     enabled: true
     path: /actuator/health
