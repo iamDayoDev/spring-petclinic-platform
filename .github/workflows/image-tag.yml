@@ -117,11 +117,22 @@ jobs:
             exit 1
           fi
 
+          REQUIRES_PULL_REQUEST="false"
+          PUSH_BRANCH="$TARGET_BRANCH"
+
+          if [ "$TARGET_BRANCH" = "$PROD_GITOPS_BRANCH" ]; then
+            SAFE_IMAGE_TAG="$(printf '%s' "$IMAGE_TAG" | tr -c '[:alnum:]._-/' '-')"
+            REQUIRES_PULL_REQUEST="true"
+            PUSH_BRANCH="automation/image-tag-${RESOLVED_ENV}-${SAFE_IMAGE_TAG}"
+          fi
+
           {
             echo "services=${UPDATED_SERVICES# }"
             echo "image_tag=${IMAGE_TAG}"
             echo "deploy_env=${RESOLVED_ENV:-dev}"
             echo "target_branch=${TARGET_BRANCH}"
+            echo "push_branch=${PUSH_BRANCH}"
+            echo "requires_pull_request=${REQUIRES_PULL_REQUEST}"
             echo "targets<<EOF"
             printf '%s' "${TARGETS}"
             echo
@@ -132,8 +143,16 @@ jobs:
         shell: bash
         env:
           TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
+          PUSH_BRANCH: ${{ steps.context.outputs.push_branch }}
+          REQUIRES_PULL_REQUEST: ${{ steps.context.outputs.requires_pull_request }}
         run: |
           set -euo pipefail
+
+          if [ "$REQUIRES_PULL_REQUEST" = "true" ]; then
+            git fetch origin "$TARGET_BRANCH"
+            git checkout -B "$PUSH_BRANCH" "origin/$TARGET_BRANCH"
+            exit 0
+          fi
 
           if git ls-remote --exit-code --heads origin "$TARGET_BRANCH" >/dev/null 2>&1; then
             git fetch origin "$TARGET_BRANCH"
@@ -175,7 +194,7 @@ jobs:
         env:
           SERVICES: ${{ steps.context.outputs.services }}
           IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
-          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
+          PUSH_BRANCH: ${{ steps.context.outputs.push_branch }}
         run: |
           set -euo pipefail
 
@@ -188,12 +207,74 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: update service image tags to ${IMAGE_TAG}"
-            git push origin "HEAD:${TARGET_BRANCH}"
+            git push origin "HEAD:${PUSH_BRANCH}"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Create pull request for protected branch
+        id: pr
+        if: steps.commit.outputs.changed == 'true' && steps.context.outputs.requires_pull_request == 'true'
+        uses: actions/github-script@v7
+        env:
+          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
+          PUSH_BRANCH: ${{ steps.context.outputs.push_branch }}
+          SERVICES: ${{ steps.context.outputs.services }}
+          DEPLOY_ENV: ${{ steps.context.outputs.deploy_env }}
+          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
+        with:
+          github-token: ${{ secrets.GITOPS_PAT }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = process.env.PUSH_BRANCH;
+            const base = process.env.TARGET_BRANCH;
+            const services = process.env.SERVICES.split(/\s+/).filter(Boolean);
+            const title = `chore: update ${process.env.DEPLOY_ENV} service image tags to ${process.env.IMAGE_TAG}`;
+            const body = [
+              '## Summary',
+              '',
+              `- environment: \`${process.env.DEPLOY_ENV}\``,
+              `- image tag: \`${process.env.IMAGE_TAG}\``,
+              `- services: ${services.map((service) => `\`${service}\``).join(', ')}`,
+              '',
+              'This PR was opened automatically because the target GitOps branch is protected.'
+            ].join('\n');
+
+            const existing = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              head: `${owner}:${head}`,
+              base
+            });
+
+            let pullRequest;
+
+            if (existing.data.length > 0) {
+              pullRequest = existing.data[0];
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: pullRequest.number,
+                title,
+                body
+              });
+            } else {
+              const created = await github.rest.pulls.create({
+                owner,
+                repo,
+                title,
+                head,
+                base,
+                body
+              });
+              pullRequest = created.data;
+            }
+
+            core.setOutput('url', pullRequest.html_url);
+
       - name: Trigger Argo CD workflow
-        if: steps.commit.outputs.changed == 'true'
+        if: steps.commit.outputs.changed == 'true' && steps.context.outputs.requires_pull_request != 'true'
         uses: actions/github-script@v7
         env:
           TARGETS: ${{ steps.context.outputs.targets }}
@@ -228,3 +309,22 @@ jobs:
                 }
               });
             }
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        env:
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          {
+            echo "### Image tag update"
+            echo "- Environment: \`${{ steps.context.outputs.deploy_env }}\`"
+            echo "- Target branch: \`${{ steps.context.outputs.target_branch }}\`"
+            echo "- Push branch: \`${{ steps.context.outputs.push_branch }}\`"
+            echo "- Requires pull request: \`${{ steps.context.outputs.requires_pull_request }}\`"
+            echo "- Services: \`${{ steps.context.outputs.services }}\`"
+            echo "- Image tag: \`${{ steps.context.outputs.image_tag }}\`"
+            if [ -n "${PR_URL:-}" ]; then
+              echo "- Pull request: ${PR_URL}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
