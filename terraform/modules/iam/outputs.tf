@@ -22,3 +22,13 @@ output "alb_policy_arn" {
   description = "Customer-managed IAM policy ARN for the AWS Load Balancer Controller"
   value       = aws_iam_policy.alb_controller.arn
 }
+
+output "external_dns_role_name" {
+  description = "IAM role name for ExternalDNS"
+  value       = aws_iam_role.external_dns.name
+}
+
+output "external_dns_role_arn" {
+  description = "IAM role ARN for ExternalDNS"
+  value       = aws_iam_role.external_dns.arn
+}

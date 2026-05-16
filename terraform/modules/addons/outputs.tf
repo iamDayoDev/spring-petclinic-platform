@@ -18,6 +18,11 @@ output "alb_controller_release_name" {
   value       = helm_release.aws_load_balancer_controller.name
 }
 
+output "external_dns_release_name" {
+  description = "Helm release name for ExternalDNS"
+  value       = helm_release.external_dns.name
+}
+
 output "monitoring_namespace" {
   description = "Namespace where the monitoring stack runs"
   value       = var.monitoring_namespace
@@ -36,6 +41,11 @@ output "grafana_service_name" {
 output "prometheus_service_name" {
   description = "Kubernetes service name for Prometheus"
   value       = "${helm_release.monitoring.name}-kube-prometheus-prometheus"
+}
+
+output "zipkin_service_name" {
+  description = "Kubernetes service name for Zipkin"
+  value       = kubernetes_service_v1.zipkin.metadata[0].name
 }
 
 output "argocd_namespace" {

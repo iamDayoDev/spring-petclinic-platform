@@ -88,6 +88,11 @@ output "prometheus_service_name" {
   value       = module.addons.prometheus_service_name
 }
 
+output "zipkin_service_name" {
+  description = "Kubernetes service name for Zipkin"
+  value       = module.addons.zipkin_service_name
+}
+
 output "grafana_port_forward_command" {
   description = "Command to access Grafana locally after the monitoring stack is installed"
   value       = "kubectl port-forward svc/${module.addons.grafana_service_name} 3000:80 -n ${module.addons.monitoring_namespace}"
@@ -96,6 +101,11 @@ output "grafana_port_forward_command" {
 output "prometheus_port_forward_command" {
   description = "Command to access Prometheus locally after the monitoring stack is installed"
   value       = "kubectl port-forward svc/${module.addons.prometheus_service_name} 9090:9090 -n ${module.addons.monitoring_namespace}"
+}
+
+output "zipkin_port_forward_command" {
+  description = "Command to access Zipkin locally after the monitoring stack is installed"
+  value       = "kubectl port-forward svc/${module.addons.zipkin_service_name} 9411:9411 -n ${module.addons.monitoring_namespace}"
 }
 
 output "argocd_namespace" {
@@ -123,7 +133,37 @@ output "argocd_admin_password_command" {
   value       = "kubectl -n ${module.addons.argocd_namespace} get secret argocd-initial-admin-secret -o jsonpath=\"{.data.password}\" | base64 -d"
 }
 
+output "external_dns_release_name" {
+  description = "Helm release name for ExternalDNS"
+  value       = module.addons.external_dns_release_name
+}
+
 output "configure_kubectl" {
   description = "Command to configure kubectl for the EKS cluster"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
+}
+
+output "app_domain" {
+  description = "Public hostname exposed for the Petclinic entrypoint"
+  value       = var.domain
+}
+
+output "route53_zone_id" {
+  description = "Route 53 public hosted zone ID used for the application domain"
+  value       = module.route53.hosted_zone_id
+}
+
+output "app_certificate_arn" {
+  description = "ACM certificate ARN managed for the application domain"
+  value       = module.route53.certificate_arn
+}
+
+output "external_dns_role_name" {
+  description = "IAM role name for ExternalDNS"
+  value       = module.iam.external_dns_role_name
+}
+
+output "external_dns_role_arn" {
+  description = "IAM role ARN for ExternalDNS"
+  value       = module.iam.external_dns_role_arn
 }

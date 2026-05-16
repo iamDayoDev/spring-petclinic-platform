@@ -1,3 +1,4 @@
+# Update Image Tag Workflow
 name: Update Image Tag
 
 on:
@@ -6,33 +7,46 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
   id-token: write
 
-
 env:
-  DEV_GITOPS_BRANCH: ${{ vars.DEV_GITOPS_BRANCH || 'ft/app-pipeline' }}
-  PROD_GITOPS_BRANCH: ${{ vars.PROD_GITOPS_BRANCH || 'main' }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+  GITOPS_REPOSITORY: iamDayoDev/spring-petclinic-platform
 
 jobs:
   update-tag:
     name: Update service image tag
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+      deploy_matrix: ${{ steps.context.outputs.deploy_matrix }}
+      image_tag: ${{ steps.context.outputs.image_tag }}
+      source_repository: ${{ steps.context.outputs.source_repository }}
+      source_sha: ${{ steps.context.outputs.source_sha }}
 
     steps:
-      - name: Checkout platform repo
+      - name: Checkout GitOps repo
         uses: actions/checkout@v4
         with:
+          repository: ${{ env.GITOPS_REPOSITORY }}
           token: ${{ secrets.GITOPS_PAT }}
           ref: main
-          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: gha-image-tag-${{ github.run_id }}
+          unset-current-credentials: true
 
       - name: Configure Git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Resolve GitOps context
+      - name: Update service values file
         id: context
         shell: bash
         env:
@@ -40,8 +54,8 @@ jobs:
           SERVICES: ${{ github.event.client_payload.services || '' }}
           IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.sha }}
           DEPLOY_ENVIRONMENT: ${{ github.event.client_payload.environment || '' }}
-          DEV_GITOPS_BRANCH: ${{ env.DEV_GITOPS_BRANCH }}
-          PROD_GITOPS_BRANCH: ${{ env.PROD_GITOPS_BRANCH }}
+          SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
+          SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
         run: |
           set -euo pipefail
 
@@ -59,8 +73,9 @@ jobs:
           fi
 
           UPDATED_SERVICES=""
+          SKIPPED_SERVICES=""
+          DEPLOY_MATRIX_ITEMS=()
           TARGETS=""
-          RESOLVED_ENV=""
 
           for raw_service in ${SERVICE_LIST//,/ }; do
             SERVICE_ENV="${DEPLOY_ENVIRONMENT:-}"
@@ -75,118 +90,105 @@ jobs:
             esac
 
             SERVICE_ENV="${SERVICE_ENV:-dev}"
-
-            if [ -n "$RESOLVED_ENV" ] && [ "$RESOLVED_ENV" != "$SERVICE_ENV" ]; then
-              echo "This workflow run resolved multiple environments ($RESOLVED_ENV and $SERVICE_ENV)." >&2
-              echo "Dispatch one environment per run so the image tag is committed to a single GitOps branch." >&2
-              exit 1
-            fi
-
-            RESOLVED_ENV="$SERVICE_ENV"
             SERVICE="${raw_service#petclinic-dev-}"
             SERVICE="${SERVICE#petclinic-prod-}"
 
             case "${SERVICE}" in
               admin-server|api-gateway|config-server|customers-service|discovery-server|genai-service|vets-service|visits-service)
                 ;;
-            *)
-              echo "Unsupported service: ${SERVICE}"
-              exit 1
-              ;;
+              *)
+                echo "Unsupported service: ${SERVICE}"
+                exit 1
+                ;;
             esac
 
-            UPDATED_SERVICES="${UPDATED_SERVICES} ${SERVICE}"
-            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}"$'\n'
-          done
-
-          case "${RESOLVED_ENV:-dev}" in
-            dev)
-              TARGET_BRANCH="$DEV_GITOPS_BRANCH"
-              ;;
-            prod)
-              TARGET_BRANCH="$PROD_GITOPS_BRANCH"
-              ;;
-            *)
-              echo "Unsupported environment: ${RESOLVED_ENV}" >&2
-              exit 1
-              ;;
-          esac
-
-          if [ -z "${TARGET_BRANCH}" ]; then
-            echo "Resolved GitOps branch is empty for environment ${RESOLVED_ENV}." >&2
-            exit 1
-          fi
-
-          REQUIRES_PULL_REQUEST="false"
-          PUSH_BRANCH="$TARGET_BRANCH"
-
-          if [ "$TARGET_BRANCH" = "$PROD_GITOPS_BRANCH" ]; then
-            SAFE_IMAGE_TAG="$(printf '%s' "$IMAGE_TAG" | tr -c '[:alnum:]._-/' '-')"
-            REQUIRES_PULL_REQUEST="true"
-            PUSH_BRANCH="automation/image-tag-${RESOLVED_ENV}-${SAFE_IMAGE_TAG}"
-          fi
-
-          {
-            echo "services=${UPDATED_SERVICES# }"
-            echo "image_tag=${IMAGE_TAG}"
-            echo "deploy_env=${RESOLVED_ENV:-dev}"
-            echo "target_branch=${TARGET_BRANCH}"
-            echo "push_branch=${PUSH_BRANCH}"
-            echo "requires_pull_request=${REQUIRES_PULL_REQUEST}"
-            echo "targets<<EOF"
-            printf '%s' "${TARGETS}"
-            echo
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Checkout target GitOps branch
-        shell: bash
-        env:
-          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
-          PUSH_BRANCH: ${{ steps.context.outputs.push_branch }}
-          REQUIRES_PULL_REQUEST: ${{ steps.context.outputs.requires_pull_request }}
-        run: |
-          set -euo pipefail
-
-          if [ "$REQUIRES_PULL_REQUEST" = "true" ]; then
-            git fetch origin "$TARGET_BRANCH"
-            git checkout -B "$PUSH_BRANCH" "origin/$TARGET_BRANCH"
-            exit 0
-          fi
-
-          if git ls-remote --exit-code --heads origin "$TARGET_BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$TARGET_BRANCH"
-            git checkout -B "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
-          else
-            git checkout -B "$TARGET_BRANCH"
-          fi
-
-      - name: Update service values files
-        shell: bash
-        env:
-          SERVICES: ${{ steps.context.outputs.services }}
-          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
-        run: |
-          set -euo pipefail
-
-          for service in $SERVICES; do
-            values_file="helm-values/${service}.yaml"
+            values_file="helm-values/${SERVICE}.yaml"
 
             if [ ! -f "${values_file}" ]; then
-              echo "Values file not found: ${values_file}" >&2
+              echo "Values file not found: ${values_file}"
               exit 1
+            fi
+
+            ENV_VALUES_FILE="helm-values/${SERVICE_ENV}.yaml"
+
+            if [ ! -f "${ENV_VALUES_FILE}" ]; then
+              echo "Environment values file not found: ${ENV_VALUES_FILE}" >&2
+              exit 1
+            fi
+
+            REPOSITORY_PREFIX="$(awk '
+              /^image:/ { in_image=1; next }
+              in_image && /^[^[:space:]]/ { exit }
+              in_image && /^[[:space:]]*repositoryPrefix:/ {
+                sub(/^[[:space:]]*repositoryPrefix:[[:space:]]*/, "", $0)
+                gsub(/"/, "", $0)
+                print $0
+                exit
+              }
+            ' "${ENV_VALUES_FILE}")"
+
+            if [ -z "${REPOSITORY_PREFIX}" ]; then
+              echo "Unable to resolve image.repositoryPrefix from ${ENV_VALUES_FILE}" >&2
+              exit 1
+            fi
+
+            REPOSITORY_NAME="${REPOSITORY_PREFIX}-${SERVICE}"
+            echo "Waiting for ECR image ${REPOSITORY_NAME}:${IMAGE_TAG}"
+
+            FOUND="false"
+            for _ in $(seq 1 30); do
+              if aws ecr describe-images \
+                --repository-name "${REPOSITORY_NAME}" \
+                --image-ids imageTag="${IMAGE_TAG}" \
+                --region "${AWS_REGION}" >/dev/null 2>&1; then
+                FOUND="true"
+                break
+              fi
+
+              sleep 10
+            done
+
+            if [ "${FOUND}" != "true" ]; then
+              echo "Skipping ${SERVICE}: image ${REPOSITORY_NAME}:${IMAGE_TAG} was not found in ECR."
+              SKIPPED_SERVICES="${SKIPPED_SERVICES} ${SERVICE}"
+              continue
             fi
 
             echo "Updating ${values_file} to image tag ${IMAGE_TAG}"
             sed -i -E "/^image:/,/^[^[:space:]]/ s|^([[:space:]]*tag:).*|\1 \"${IMAGE_TAG}\"|" "${values_file}"
 
             if ! grep -Fq "  tag: \"${IMAGE_TAG}\"" "${values_file}"; then
-              echo "Failed to update image.tag in ${values_file}" >&2
+              echo "Failed to update image.tag in ${values_file}"
               exit 1
             fi
+
+            UPDATED_SERVICES="${UPDATED_SERVICES} ${SERVICE}"
+            DEPLOY_MATRIX_ITEMS+=("{\"service\":\"${SERVICE}\",\"environment\":\"${SERVICE_ENV}\"}")
+            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}:${REPOSITORY_PREFIX}"$'\n'
           done
 
+          if [ -z "${UPDATED_SERVICES# }" ]; then
+            echo "No service images with tag ${IMAGE_TAG} were found in ECR." >&2
+            echo "Received services: ${SERVICE_LIST}" >&2
+            exit 1
+          fi
+
           git diff -- helm-values/
+
+          DEPLOY_MATRIX="[$(IFS=,; echo "${DEPLOY_MATRIX_ITEMS[*]}")]"
+
+          {
+            echo "services=${UPDATED_SERVICES# }"
+            echo "skipped_services=${SKIPPED_SERVICES# }"
+            echo "image_tag=${IMAGE_TAG}"
+            echo "source_repository=${SOURCE_REPOSITORY}"
+            echo "source_sha=${SOURCE_SHA}"
+            echo "deploy_matrix=${DEPLOY_MATRIX}"
+            echo "targets<<EOF"
+            printf '%s' "${TARGETS}"
+            echo
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Commit updated tag
         id: commit
@@ -194,7 +196,6 @@ jobs:
         env:
           SERVICES: ${{ steps.context.outputs.services }}
           IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
-          PUSH_BRANCH: ${{ steps.context.outputs.push_branch }}
         run: |
           set -euo pipefail
 
@@ -207,124 +208,23 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "chore: update service image tags to ${IMAGE_TAG}"
-            git push origin "HEAD:${PUSH_BRANCH}"
+            git push origin main
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create pull request for protected branch
-        id: pr
-        if: steps.commit.outputs.changed == 'true' && steps.context.outputs.requires_pull_request == 'true'
-        uses: actions/github-script@v7
-        env:
-          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
-          PUSH_BRANCH: ${{ steps.context.outputs.push_branch }}
-          SERVICES: ${{ steps.context.outputs.services }}
-          DEPLOY_ENV: ${{ steps.context.outputs.deploy_env }}
-          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
-        with:
-          github-token: ${{ secrets.GITOPS_PAT }}
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const head = process.env.PUSH_BRANCH;
-            const base = process.env.TARGET_BRANCH;
-            const services = process.env.SERVICES.split(/\s+/).filter(Boolean);
-            const title = `chore: update ${process.env.DEPLOY_ENV} service image tags to ${process.env.IMAGE_TAG}`;
-            const body = [
-              '## Summary',
-              '',
-              `- environment: \`${process.env.DEPLOY_ENV}\``,
-              `- image tag: \`${process.env.IMAGE_TAG}\``,
-              `- services: ${services.map((service) => `\`${service}\``).join(', ')}`,
-              '',
-              'This PR was opened automatically because the target GitOps branch is protected.'
-            ].join('\n');
-
-            const existing = await github.rest.pulls.list({
-              owner,
-              repo,
-              state: 'open',
-              head: `${owner}:${head}`,
-              base
-            });
-
-            let pullRequest;
-
-            if (existing.data.length > 0) {
-              pullRequest = existing.data[0];
-              await github.rest.pulls.update({
-                owner,
-                repo,
-                pull_number: pullRequest.number,
-                title,
-                body
-              });
-            } else {
-              const created = await github.rest.pulls.create({
-                owner,
-                repo,
-                title,
-                head,
-                base,
-                body
-              });
-              pullRequest = created.data;
-            }
-
-            core.setOutput('url', pullRequest.html_url);
-
-      - name: Trigger Argo CD workflow
-        if: steps.commit.outputs.changed == 'true' && steps.context.outputs.requires_pull_request != 'true'
-        uses: actions/github-script@v7
-        env:
-          TARGETS: ${{ steps.context.outputs.targets }}
-          TARGET_BRANCH: ${{ steps.context.outputs.target_branch }}
-          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
-          SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
-          SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
-        with:
-          github-token: ${{ secrets.GITOPS_PAT }}
-          script: |
-            const targets = process.env.TARGETS
-              .split(/\r?\n/)
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .map((line) => {
-                const [service, environment] = line.split(':');
-                return { service, environment };
-              });
-
-            for (const { service, environment } of targets) {
-              await github.rest.actions.createWorkflowDispatch({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'argocd.yml',
-                ref: process.env.TARGET_BRANCH,
-                inputs: {
-                  service,
-                  environment,
-                  image_tag: process.env.IMAGE_TAG,
-                  source_repository: process.env.SOURCE_REPOSITORY,
-                  source_sha: process.env.SOURCE_SHA
-                }
-              });
-            }
-
-      - name: Workflow summary
-        if: always()
-        shell: bash
-        env:
-          PR_URL: ${{ steps.pr.outputs.url }}
-        run: |
-          {
-            echo "### Image tag update"
-            echo "- Environment: \`${{ steps.context.outputs.deploy_env }}\`"
-            echo "- Target branch: \`${{ steps.context.outputs.target_branch }}\`"
-            echo "- Push branch: \`${{ steps.context.outputs.push_branch }}\`"
-            echo "- Requires pull request: \`${{ steps.context.outputs.requires_pull_request }}\`"
-            echo "- Services: \`${{ steps.context.outputs.services }}\`"
-            echo "- Image tag: \`${{ steps.context.outputs.image_tag }}\`"
-            if [ -n "${PR_URL:-}" ]; then
-              echo "- Pull request: ${PR_URL}"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+  deploy:
+    name: Deploy via Argo CD
+    needs: update-tag
+    if: needs.update-tag.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.update-tag.outputs.deploy_matrix) }}
+    uses: ./.github/workflows/argocd.yml
+    with:
+      service: ${{ matrix.target.service }}
+      environment: ${{ matrix.target.environment }}
+      image_tag: ${{ needs.update-tag.outputs.image_tag }}
+      source_repository: ${{ needs.update-tag.outputs.source_repository }}
+      source_sha: ${{ needs.update-tag.outputs.source_sha }}
+    secrets: inherit

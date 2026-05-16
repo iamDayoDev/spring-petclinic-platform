@@ -10,8 +10,8 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
-      targetRevision: ft/app-pipeline
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
+      targetRevision: main
       path: helm/petclinic-service
       helm:
         releaseName: api-gateway
@@ -19,12 +19,16 @@ spec:
           - $values/helm-values/dev.yaml
           - $values/helm-values/api-gateway.yaml
         parameters:
-          - name: service.type
-            value: LoadBalancer
           - name: ingress.enabled
-            value: "false"
-    - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
-      targetRevision: ft/app-pipeline
+            value: "true"
+          - name: ingress.host
+            value: petclinic.dayoclouddev.site
+          - name: ingress.annotations.alb\.ingress\.kubernetes\.io/load-balancer-name
+            value: petclinic-dev-alb
+          - name: ingress.annotations.external-dns\.alpha\.kubernetes\.io/hostname
+            value: petclinic.dayoclouddev.site
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc

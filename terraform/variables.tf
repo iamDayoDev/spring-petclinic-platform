@@ -26,6 +26,10 @@ variable "monitoring_grafana_service_type" {
   description = "Kubernetes service type for Grafana in the monitoring stack"
   type        = string
 }
+variable "monitoring_zipkin_service_type" {
+  description = "Kubernetes service type for Zipkin in the monitoring stack"
+  type        = string
+}
 variable "argocd_server_service_type" {
   description = "Kubernetes service type for the Argo CD API server"
   type        = string
@@ -50,6 +54,10 @@ variable "domain" {
   description = "Domain name for the application"
   type        = string
 }
+variable "hosted_zone_name" {
+  description = "Public Route 53 hosted zone name that should own the application domain"
+  type        = string
+}
 variable "eso_role_name" {
   description = "Name of the role for External Secrets Operator"
   type        = string
@@ -60,6 +68,10 @@ variable "alb_role_name" {
 }
 variable "alb_policy_name" {
   description = "Name of the policy for AWS Load Balancer Controller"
+  type        = string
+}
+variable "external_dns_role_name" {
+  description = "Name of the role for ExternalDNS"
   type        = string
 }
 variable "cluster_admin_principal_arns" {

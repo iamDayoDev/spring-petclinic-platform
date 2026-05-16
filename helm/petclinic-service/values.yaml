@@ -63,6 +63,12 @@ openai:
   key: SPRING_AI_OPENAI_API_KEY
   envName: SPRING_AI_OPENAI_API_KEY
 
+tracing:
+  enabled: false
+  zipkin:
+    endpoint: ""
+  samplingProbability: "1.0"
+
 env: []
 envFrom: []
 
@@ -87,6 +93,11 @@ metrics:
       release: monitoring
 
 probes:
+  startup:
+    enabled: false
+    path: /actuator/health
+    periodSeconds: 10
+    failureThreshold: 30
   readiness:
     enabled: true
     path: /actuator/health

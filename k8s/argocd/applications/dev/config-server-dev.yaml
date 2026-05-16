@@ -10,16 +10,16 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
-      targetRevision: ft/app-pipeline
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
+      targetRevision: main
       path: helm/petclinic-service
       helm:
         releaseName: config-server
         valueFiles:
           - $values/helm-values/dev.yaml
           - $values/helm-values/config-server.yaml
-    - repoURL: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
-      targetRevision: ft/app-pipeline
+    - repoURL: https://github.com/iamDayoDev/spring-petclinic-platform.git
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc

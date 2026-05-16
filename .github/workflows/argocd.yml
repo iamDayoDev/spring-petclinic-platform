@@ -1,3 +1,4 @@
+# Argo CD Application Manifests Workflow
 name: Apply Argo CD Manifests
 
 on:
@@ -36,6 +37,40 @@ on:
         description: "Optional source SHA for summary output."
         required: false
         type: string
+  workflow_call:
+    inputs:
+      service:
+        description: "Petclinic service to refresh in Argo CD."
+        required: true
+        type: string
+      environment:
+        description: "Argo CD application environment."
+        required: false
+        default: dev
+        type: string
+      image_tag:
+        description: "Optional image tag to verify against helm-values/<service>.yaml."
+        required: false
+        type: string
+      source_repository:
+        description: "Optional source repository for summary output."
+        required: false
+        type: string
+      source_sha:
+        description: "Optional source SHA for summary output."
+        required: false
+        type: string
+    secrets:
+      AWS_REGION:
+        required: true
+      AWS_ROLE_ARN:
+        required: true
+      GITOPS_PAT:
+        required: true
+      OPENAI_API_KEY:
+        required: true
+      ARGOCD_REPO_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -47,8 +82,8 @@ env:
   CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
   ARGOCD_NAMESPACE: argocd
   INSTALL_KUSTOMIZATION: k8s/argocd/install
-  DEV_GITOPS_BRANCH: ${{ vars.DEV_GITOPS_BRANCH || 'ft/app-pipeline' }}
-  PROD_GITOPS_BRANCH: ${{ vars.PROD_GITOPS_BRANCH || 'main' }}
+  GITOPS_REPOSITORY: iamDayoDev/spring-petclinic-platform
+  GITOPS_REPO_URL: https://github.com/iamDayoDev/spring-petclinic-platform.git
 
 jobs:
   apply:
@@ -56,10 +91,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout GitOps repo
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          repository: ${{ env.GITOPS_REPOSITORY }}
+          token: ${{ secrets.GITOPS_PAT }}
+          ref: main
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
@@ -81,9 +118,6 @@ jobs:
           INPUT_IMAGE_TAG: ${{ inputs.image_tag || '' }}
           INPUT_SOURCE_REPOSITORY: ${{ inputs.source_repository || '' }}
           INPUT_SOURCE_SHA: ${{ inputs.source_sha || '' }}
-          DEV_GITOPS_BRANCH: ${{ env.DEV_GITOPS_BRANCH }}
-          PROD_GITOPS_BRANCH: ${{ env.PROD_GITOPS_BRANCH }}
-          CURRENT_GITOPS_BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
@@ -92,7 +126,6 @@ jobs:
           EXPECTED_IMAGE_TAG="$INPUT_IMAGE_TAG"
           SOURCE_REPOSITORY="$INPUT_SOURCE_REPOSITORY"
           SOURCE_SHA="$INPUT_SOURCE_SHA"
-          GITOPS_BRANCH="$CURRENT_GITOPS_BRANCH"
 
           case "$SERVICE" in
             admin-server|api-gateway|config-server|customers-service|discovery-server|genai-service|vets-service|visits-service)
@@ -106,22 +139,15 @@ jobs:
           case "$DEPLOY_ENV" in
             dev)
               APP_NAMESPACE="petclinic"
-              EXPECTED_BRANCH="$DEV_GITOPS_BRANCH"
               ;;
             prod)
               APP_NAMESPACE="petclinic-prod"
-              EXPECTED_BRANCH="$PROD_GITOPS_BRANCH"
               ;;
             *)
               echo "Unsupported environment: $DEPLOY_ENV" >&2
               exit 1
               ;;
           esac
-
-          if [ "$GITOPS_BRANCH" != "$EXPECTED_BRANCH" ]; then
-            echo "Environment '$DEPLOY_ENV' must run from GitOps branch '$EXPECTED_BRANCH', but this workflow is running from '$GITOPS_BRANCH'." >&2
-            exit 1
-          fi
 
           ENV_VALUES_FILE="helm-values/${DEPLOY_ENV}.yaml"
           SERVICE_VALUES_FILE="helm-values/${SERVICE}.yaml"
@@ -166,7 +192,7 @@ jobs:
 
           if [ -n "$EXPECTED_IMAGE_TAG" ] && [ "$EXPECTED_IMAGE_TAG" != "$ACTUAL_IMAGE_TAG" ]; then
             echo "Expected image tag '$EXPECTED_IMAGE_TAG' but $SERVICE_VALUES_FILE contains '$ACTUAL_IMAGE_TAG'." >&2
-            echo "Make sure image-tag.yml pushed the manifest change to branch '$GITOPS_BRANCH' before dispatching Argo CD." >&2
+            echo "Make sure image-tag.yml pushed the manifest change to main before dispatching Argo CD." >&2
             exit 1
           fi
 
@@ -184,7 +210,6 @@ jobs:
             echo "secrets_application_name=$SECRETS_APPLICATION_NAME"
             echo "cluster_secret_store=$CLUSTER_SECRET_STORE"
             echo "image_tag=$ACTUAL_IMAGE_TAG"
-            echo "gitops_branch=$GITOPS_BRANCH"
             echo "source_repository=$SOURCE_REPOSITORY"
             echo "source_sha=$SOURCE_SHA"
           } >> "$GITHUB_OUTPUT"
@@ -240,11 +265,19 @@ jobs:
             exit 1
           fi
 
+          if kubectl get secret openai-secret --namespace "$APP_NAMESPACE" >/dev/null 2>&1; then
+            KEY_B64="$(printf '%s' "$OPENAI_API_KEY" | base64 | tr -d '\n')"
+
+            kubectl patch secret openai-secret \
+              --namespace "$APP_NAMESPACE" \
+              --type merge \
+              -p "{\"data\":{\"SPRING_AI_OPENAI_API_KEY\":\"${KEY_B64}\"}}"
+            exit 0
+          fi
+
           kubectl create secret generic openai-secret \
             --namespace "$APP_NAMESPACE" \
-            --from-literal=SPRING_AI_OPENAI_API_KEY="$OPENAI_API_KEY" \
-            --dry-run=client \
-            -o yaml | kubectl apply -f -
+            --from-literal=SPRING_AI_OPENAI_API_KEY="$OPENAI_API_KEY"
 
       - name: Ensure Argo CD control plane exists
         id: install
@@ -273,27 +306,40 @@ jobs:
           kubectl rollout status deployment/argocd-server --namespace "$ARGOCD_NAMESPACE" --timeout=10m
 
       - name: Create or update Argo CD repository credential
-        if: ${{ secrets.ARGOCD_REPO_TOKEN != '' }}
         shell: bash
         env:
           ARGOCD_REPO_TOKEN: ${{ secrets.ARGOCD_REPO_TOKEN }}
         run: |
           set -euo pipefail
 
-          kubectl apply -f - <<EOF
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: petclinic-platform-repo
-            namespace: ${ARGOCD_NAMESPACE}
-            labels:
-              argocd.argoproj.io/secret-type: repository
-          stringData:
-            type: git
-            url: https://github.com/Achievers11-DevOps/petclinic-k8s-platform.git
-            username: x-access-token
-            password: ${ARGOCD_REPO_TOKEN}
-          EOF
+          if [ -z "${ARGOCD_REPO_TOKEN:-}" ]; then
+            echo "ARGOCD_REPO_TOKEN is not set; skipping Argo CD repository credential creation."
+            exit 0
+          fi
+
+          if kubectl get secret petclinic-platform-repo --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
+            TYPE_B64="$(printf '%s' 'git' | base64 | tr -d '\n')"
+            URL_B64="$(printf '%s' "$GITOPS_REPO_URL" | base64 | tr -d '\n')"
+            USER_B64="$(printf '%s' 'x-access-token' | base64 | tr -d '\n')"
+            PASSWORD_B64="$(printf '%s' "$ARGOCD_REPO_TOKEN" | base64 | tr -d '\n')"
+
+            kubectl patch secret petclinic-platform-repo \
+              --namespace "$ARGOCD_NAMESPACE" \
+              --type merge \
+              -p "{\"metadata\":{\"labels\":{\"argocd.argoproj.io/secret-type\":\"repository\"}},\"data\":{\"type\":\"${TYPE_B64}\",\"url\":\"${URL_B64}\",\"username\":\"${USER_B64}\",\"password\":\"${PASSWORD_B64}\"}}"
+            exit 0
+          fi
+
+          kubectl create secret generic petclinic-platform-repo \
+            --namespace "$ARGOCD_NAMESPACE" \
+            --from-literal=type=git \
+            --from-literal=url="$GITOPS_REPO_URL" \
+            --from-literal=username=x-access-token \
+            --from-literal=password="$ARGOCD_REPO_TOKEN" \
+            --dry-run=client \
+            -o yaml \
+            | kubectl label --local -f - argocd.argoproj.io/secret-type=repository --overwrite -o yaml \
+            | kubectl apply -f -
 
       - name: Apply Argo CD application manifests
         shell: bash
@@ -303,6 +349,22 @@ jobs:
           set -euo pipefail
 
           kubectl apply -k "$APPLICATIONS_KUSTOMIZATION"
+
+      - name: Remove legacy hostname ingress
+        shell: bash
+        env:
+          SERVICE: ${{ steps.context.outputs.service }}
+          APP_NAMESPACE: ${{ steps.context.outputs.app_namespace }}
+        run: |
+          set -euo pipefail
+
+          if [ "$SERVICE" != "api-gateway" ]; then
+            exit 0
+          fi
+
+          kubectl delete ingress petclinic-ingress \
+            --namespace "$APP_NAMESPACE" \
+            --ignore-not-found
 
       - name: Force refresh target applications
         shell: bash
@@ -360,7 +422,6 @@ jobs:
             echo "- Argo CD namespace: \`$ARGOCD_NAMESPACE\`"
             echo "- App namespace: \`${{ steps.context.outputs.app_namespace }}\`"
             echo "- Environment: \`${{ steps.context.outputs.deploy_env }}\`"
-            echo "- GitOps branch: \`${{ steps.context.outputs.gitops_branch }}\`"
             echo "- Service: \`${{ steps.context.outputs.service }}\`"
             echo "- Image tag from Git: \`${{ steps.context.outputs.image_tag }}\`"
             echo "- Install step: \`${{ steps.install.outputs.action || 'completed' }}\`"
