@@ -1,5 +1,5 @@
 image:
-  tag: 19039bd
+  tag: "bc825ec"
 
 service:
   name: api-gateway
@@ -16,4 +16,19 @@ dependencies:
   configServer:
     enabled: true
   discoveryServer:
-    enabled: false
+    enabled: true
+
+probes:
+  startup:
+    enabled: true
+    path: /actuator/health
+    periodSeconds: 10
+    failureThreshold: 30
+  readiness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 6
+  liveness:
+    initialDelaySeconds: 120
+    periodSeconds: 15
+    failureThreshold: 3

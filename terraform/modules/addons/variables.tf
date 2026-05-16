@@ -28,6 +28,11 @@ variable "monitoring_grafana_service_type" {
   type        = string
 }
 
+variable "monitoring_zipkin_service_type" {
+  description = "Kubernetes service type for Zipkin in the monitoring stack"
+  type        = string
+}
+
 variable "argocd_namespace" {
   description = "Namespace where Argo CD runs"
   type        = string
@@ -70,5 +75,25 @@ variable "alb_service_account_name" {
 
 variable "alb_role_arn" {
   description = "IRSA role ARN for the AWS Load Balancer Controller"
+  type        = string
+}
+
+variable "external_dns_namespace" {
+  description = "Namespace where ExternalDNS runs"
+  type        = string
+}
+
+variable "external_dns_service_account_name" {
+  description = "Service account name used by ExternalDNS"
+  type        = string
+}
+
+variable "external_dns_role_arn" {
+  description = "IRSA role ARN for ExternalDNS"
+  type        = string
+}
+
+variable "hosted_zone_name" {
+  description = "Public Route 53 hosted zone name managed by ExternalDNS"
   type        = string
 }

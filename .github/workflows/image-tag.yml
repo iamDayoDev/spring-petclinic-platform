@@ -1,3 +1,4 @@
+# Update Image Tag Workflow
 name: Update Image Tag
 
 on:
@@ -6,18 +7,39 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+  GITOPS_REPOSITORY: iamDayoDev/spring-petclinic-platform
 
 jobs:
   update-tag:
     name: Update service image tag
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+      deploy_matrix: ${{ steps.context.outputs.deploy_matrix }}
+      image_tag: ${{ steps.context.outputs.image_tag }}
+      source_repository: ${{ steps.context.outputs.source_repository }}
+      source_sha: ${{ steps.context.outputs.source_sha }}
 
     steps:
-      - name: Checkout platform repo
+      - name: Checkout GitOps repo
         uses: actions/checkout@v4
         with:
+          repository: ${{ env.GITOPS_REPOSITORY }}
           token: ${{ secrets.GITOPS_PAT }}
           ref: main
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: gha-image-tag-${{ github.run_id }}
+          unset-current-credentials: true
 
       - name: Configure Git identity
         run: |
@@ -32,6 +54,8 @@ jobs:
           SERVICES: ${{ github.event.client_payload.services || '' }}
           IMAGE_TAG: ${{ github.event.client_payload.image_tag || github.event.client_payload.sha }}
           DEPLOY_ENVIRONMENT: ${{ github.event.client_payload.environment || '' }}
+          SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
+          SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
         run: |
           set -euo pipefail
 
@@ -49,6 +73,8 @@ jobs:
           fi
 
           UPDATED_SERVICES=""
+          SKIPPED_SERVICES=""
+          DEPLOY_MATRIX_ITEMS=()
           TARGETS=""
 
           for raw_service in ${SERVICE_LIST//,/ }; do
@@ -83,6 +109,51 @@ jobs:
               exit 1
             fi
 
+            ENV_VALUES_FILE="helm-values/${SERVICE_ENV}.yaml"
+
+            if [ ! -f "${ENV_VALUES_FILE}" ]; then
+              echo "Environment values file not found: ${ENV_VALUES_FILE}" >&2
+              exit 1
+            fi
+
+            REPOSITORY_PREFIX="$(awk '
+              /^image:/ { in_image=1; next }
+              in_image && /^[^[:space:]]/ { exit }
+              in_image && /^[[:space:]]*repositoryPrefix:/ {
+                sub(/^[[:space:]]*repositoryPrefix:[[:space:]]*/, "", $0)
+                gsub(/"/, "", $0)
+                print $0
+                exit
+              }
+            ' "${ENV_VALUES_FILE}")"
+
+            if [ -z "${REPOSITORY_PREFIX}" ]; then
+              echo "Unable to resolve image.repositoryPrefix from ${ENV_VALUES_FILE}" >&2
+              exit 1
+            fi
+
+            REPOSITORY_NAME="${REPOSITORY_PREFIX}-${SERVICE}"
+            echo "Waiting for ECR image ${REPOSITORY_NAME}:${IMAGE_TAG}"
+
+            FOUND="false"
+            for _ in $(seq 1 30); do
+              if aws ecr describe-images \
+                --repository-name "${REPOSITORY_NAME}" \
+                --image-ids imageTag="${IMAGE_TAG}" \
+                --region "${AWS_REGION}" >/dev/null 2>&1; then
+                FOUND="true"
+                break
+              fi
+
+              sleep 10
+            done
+
+            if [ "${FOUND}" != "true" ]; then
+              echo "Skipping ${SERVICE}: image ${REPOSITORY_NAME}:${IMAGE_TAG} was not found in ECR."
+              SKIPPED_SERVICES="${SKIPPED_SERVICES} ${SERVICE}"
+              continue
+            fi
+
             echo "Updating ${values_file} to image tag ${IMAGE_TAG}"
             sed -i -E "/^image:/,/^[^[:space:]]/ s|^([[:space:]]*tag:).*|\1 \"${IMAGE_TAG}\"|" "${values_file}"
 
@@ -92,14 +163,27 @@ jobs:
             fi
 
             UPDATED_SERVICES="${UPDATED_SERVICES} ${SERVICE}"
-            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}"$'\n'
+            DEPLOY_MATRIX_ITEMS+=("{\"service\":\"${SERVICE}\",\"environment\":\"${SERVICE_ENV}\"}")
+            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}:${REPOSITORY_PREFIX}"$'\n'
           done
+
+          if [ -z "${UPDATED_SERVICES# }" ]; then
+            echo "No service images with tag ${IMAGE_TAG} were found in ECR." >&2
+            echo "Received services: ${SERVICE_LIST}" >&2
+            exit 1
+          fi
 
           git diff -- helm-values/
 
+          DEPLOY_MATRIX="[$(IFS=,; echo "${DEPLOY_MATRIX_ITEMS[*]}")]"
+
           {
             echo "services=${UPDATED_SERVICES# }"
+            echo "skipped_services=${SKIPPED_SERVICES# }"
             echo "image_tag=${IMAGE_TAG}"
+            echo "source_repository=${SOURCE_REPOSITORY}"
+            echo "source_sha=${SOURCE_SHA}"
+            echo "deploy_matrix=${DEPLOY_MATRIX}"
             echo "targets<<EOF"
             printf '%s' "${TARGETS}"
             echo
@@ -128,38 +212,19 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Trigger Argo CD workflow
-        if: steps.commit.outputs.changed == 'true'
-        uses: actions/github-script@v7
-        env:
-          TARGETS: ${{ steps.context.outputs.targets }}
-          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
-          SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
-          SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
-        with:
-          github-token: ${{ secrets.GITOPS_PAT }}
-          script: |
-            const targets = process.env.TARGETS
-              .split(/\r?\n/)
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .map((line) => {
-                const [service, environment] = line.split(':');
-                return { service, environment };
-              });
-
-            for (const { service, environment } of targets) {
-              await github.rest.actions.createWorkflowDispatch({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'argocd.yml',
-                ref: 'main',
-                inputs: {
-                  service,
-                  environment,
-                  image_tag: process.env.IMAGE_TAG,
-                  source_repository: process.env.SOURCE_REPOSITORY,
-                  source_sha: process.env.SOURCE_SHA
-                }
-              });
-            }
+  deploy:
+    name: Deploy via Argo CD
+    needs: update-tag
+    if: needs.update-tag.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.update-tag.outputs.deploy_matrix) }}
+    uses: ./.github/workflows/argocd.yml
+    with:
+      service: ${{ matrix.target.service }}
+      environment: ${{ matrix.target.environment }}
+      image_tag: ${{ needs.update-tag.outputs.image_tag }}
+      source_repository: ${{ needs.update-tag.outputs.source_repository }}
+      source_sha: ${{ needs.update-tag.outputs.source_sha }}
+    secrets: inherit

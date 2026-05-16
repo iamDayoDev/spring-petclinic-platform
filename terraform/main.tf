@@ -3,9 +3,18 @@ locals {
   eso_service_account_name  = "external-secrets"
   alb_namespace             = "kube-system"
   alb_service_account_name  = "aws-load-balancer-controller"
+  external_dns_namespace    = "kube-system"
+  external_dns_service_account_name = "external-dns"
   cluster_secret_store_name = "aws-secrets-manager"
   monitoring_namespace      = "monitoring"
   argocd_namespace          = "argocd"
+}
+
+module "route53" {
+  source = "./modules/route53"
+
+  domain           = var.domain
+  hosted_zone_name = var.hosted_zone_name
 }
 
 module "vpc" {
@@ -39,6 +48,10 @@ module "iam" {
   alb_service_account_name   = local.alb_service_account_name
   alb_policy_name            = var.alb_policy_name
   alb_controller_policy_json = file("${path.module}/iam_policy.json")
+  external_dns_role_name     = var.external_dns_role_name
+  external_dns_namespace     = local.external_dns_namespace
+  external_dns_service_account_name = local.external_dns_service_account_name
+  external_dns_zone_ids      = [module.route53.hosted_zone_id]
 }
 
 module "addons" {
@@ -49,6 +62,7 @@ module "addons" {
   app_namespace             = var.app_namespace
   monitoring_namespace      = local.monitoring_namespace
   monitoring_grafana_service_type = var.monitoring_grafana_service_type
+  monitoring_zipkin_service_type  = var.monitoring_zipkin_service_type
   argocd_namespace          = local.argocd_namespace
   argocd_server_service_type = var.argocd_server_service_type
   cluster_secret_store_name = local.cluster_secret_store_name
@@ -58,9 +72,13 @@ module "addons" {
   alb_namespace             = local.alb_namespace
   alb_service_account_name  = local.alb_service_account_name
   alb_role_arn              = module.iam.alb_role_arn
+  external_dns_namespace    = local.external_dns_namespace
+  external_dns_service_account_name = local.external_dns_service_account_name
+  external_dns_role_arn     = module.iam.external_dns_role_arn
+  hosted_zone_name          = var.hosted_zone_name
   cluster_name              = module.eks.cluster_name
 
-  depends_on = [module.eks, module.iam]
+  depends_on = [module.eks, module.iam, module.route53]
 }
 
 module "ecr" {

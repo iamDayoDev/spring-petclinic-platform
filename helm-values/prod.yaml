@@ -12,6 +12,12 @@ service:
 metrics:
   enabled: true
 
+tracing:
+  enabled: true
+  zipkin:
+    endpoint: http://zipkin.monitoring.svc.cluster.local:9411/api/v2/spans
+  samplingProbability: "0.1"
+
 resources:
   requests:
     memory: 512Mi
