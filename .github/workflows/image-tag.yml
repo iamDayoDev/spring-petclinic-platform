@@ -56,6 +56,7 @@ jobs:
           DEPLOY_ENVIRONMENT: ${{ github.event.client_payload.environment || '' }}
           SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
           SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
+          ALLOW_MULTIPLE_SERVICES: ${{ github.event.client_payload.allow_multiple_services || '' }}
         run: |
           set -euo pipefail
 
@@ -69,6 +70,18 @@ jobs:
 
           if [ -z "${IMAGE_TAG}" ]; then
             echo "client_payload.image_tag or client_payload.sha is required"
+            exit 1
+          fi
+
+          SERVICE_COUNT=0
+          for _ in ${SERVICE_LIST//,/ }; do
+            SERVICE_COUNT=$((SERVICE_COUNT + 1))
+          done
+
+          if [ "${SERVICE_COUNT}" -gt 1 ] && [ "${ALLOW_MULTIPLE_SERVICES}" != "true" ]; then
+            echo "Refusing to update multiple services from a single image event." >&2
+            echo "Received services: ${SERVICE_LIST}" >&2
+            echo "If this was intentional, dispatch with allow_multiple_services=true." >&2
             exit 1
           fi
 
