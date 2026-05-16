@@ -11,9 +11,11 @@ node_min_size = 2
 node_max_size = 5
 
 domain = "petclinic.dayoclouddev.site"
+hosted_zone_name = "dayoclouddev.site"
 eso_role_name  = "petclinic-eso-role"
 alb_role_name  = "petclinic-alb-role"
 alb_policy_name = "AWSLoadBalancerControllerIAMPolicy"
+external_dns_role_name = "petclinic-external-dns-role"
 
 cluster_admin_principal_arns = [
   "arn:aws:iam::536697234487:user/Joshua",

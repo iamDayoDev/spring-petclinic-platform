@@ -73,3 +73,36 @@ resource "helm_release" "aws_load_balancer_controller" {
 
   depends_on = [helm_release.external_secrets_bootstrap]
 }
+
+resource "helm_release" "external_dns" {
+  name       = "external-dns"
+  repository = "https://kubernetes-sigs.github.io/external-dns/"
+  chart      = "external-dns"
+  namespace  = var.external_dns_namespace
+  wait       = true
+  timeout    = 600
+
+  values = [
+    yamlencode({
+      provider = {
+        name = "aws"
+      }
+      policy       = "upsert-only"
+      txtOwnerId   = var.cluster_name
+      domainFilters = [trimsuffix(var.hosted_zone_name, ".")]
+      sources      = ["ingress"]
+      extraArgs = {
+        "aws-zone-type" = "public"
+      }
+      serviceAccount = {
+        create = true
+        name   = var.external_dns_service_account_name
+        annotations = {
+          "eks.amazonaws.com/role-arn" = var.external_dns_role_arn
+        }
+      }
+    })
+  ]
+
+  depends_on = [helm_release.aws_load_balancer_controller]
+}

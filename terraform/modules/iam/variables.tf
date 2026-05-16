@@ -66,3 +66,27 @@ variable "alb_controller_policy_json" {
   description = "IAM policy document for the AWS Load Balancer Controller"
   type        = string
 }
+
+variable "external_dns_role_name" {
+  description = "IAM role name for ExternalDNS"
+  type        = string
+  default     = "petclinic-external-dns-role"
+}
+
+variable "external_dns_namespace" {
+  description = "Namespace of the ExternalDNS service account"
+  type        = string
+  default     = "kube-system"
+}
+
+variable "external_dns_service_account_name" {
+  description = "Service account name used by ExternalDNS"
+  type        = string
+  default     = "external-dns"
+}
+
+variable "external_dns_zone_ids" {
+  description = "Public Route 53 hosted zone IDs that ExternalDNS may manage"
+  type        = set(string)
+  default     = []
+}

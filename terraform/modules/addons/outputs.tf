@@ -18,6 +18,11 @@ output "alb_controller_release_name" {
   value       = helm_release.aws_load_balancer_controller.name
 }
 
+output "external_dns_release_name" {
+  description = "Helm release name for ExternalDNS"
+  value       = helm_release.external_dns.name
+}
+
 output "monitoring_namespace" {
   description = "Namespace where the monitoring stack runs"
   value       = var.monitoring_namespace

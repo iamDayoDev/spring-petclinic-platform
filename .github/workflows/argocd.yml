@@ -333,6 +333,22 @@ jobs:
 
           kubectl apply -k "$APPLICATIONS_KUSTOMIZATION"
 
+      - name: Remove legacy hostname ingress
+        shell: bash
+        env:
+          SERVICE: ${{ steps.context.outputs.service }}
+          APP_NAMESPACE: ${{ steps.context.outputs.app_namespace }}
+        run: |
+          set -euo pipefail
+
+          if [ "$SERVICE" != "api-gateway" ]; then
+            exit 0
+          fi
+
+          kubectl delete ingress petclinic-ingress \
+            --namespace "$APP_NAMESPACE" \
+            --ignore-not-found
+
       - name: Force refresh target applications
         shell: bash
         env:
