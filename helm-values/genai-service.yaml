@@ -1,5 +1,5 @@
 image:
-  tag: 19039bd
+  tag: "eeb63dd"
 
 service:
   name: genai-service
