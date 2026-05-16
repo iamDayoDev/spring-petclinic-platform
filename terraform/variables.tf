@@ -26,6 +26,10 @@ variable "monitoring_grafana_service_type" {
   description = "Kubernetes service type for Grafana in the monitoring stack"
   type        = string
 }
+variable "monitoring_zipkin_service_type" {
+  description = "Kubernetes service type for Zipkin in the monitoring stack"
+  type        = string
+}
 variable "argocd_server_service_type" {
   description = "Kubernetes service type for the Argo CD API server"
   type        = string

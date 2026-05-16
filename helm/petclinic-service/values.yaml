@@ -63,6 +63,12 @@ openai:
   key: SPRING_AI_OPENAI_API_KEY
   envName: SPRING_AI_OPENAI_API_KEY
 
+tracing:
+  enabled: false
+  zipkin:
+    endpoint: ""
+  samplingProbability: "1.0"
+
 env: []
 envFrom: []
 

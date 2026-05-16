@@ -62,6 +62,7 @@ module "addons" {
   app_namespace             = var.app_namespace
   monitoring_namespace      = local.monitoring_namespace
   monitoring_grafana_service_type = var.monitoring_grafana_service_type
+  monitoring_zipkin_service_type  = var.monitoring_zipkin_service_type
   argocd_namespace          = local.argocd_namespace
   argocd_server_service_type = var.argocd_server_service_type
   cluster_secret_store_name = local.cluster_secret_store_name

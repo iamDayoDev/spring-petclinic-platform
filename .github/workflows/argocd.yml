@@ -309,20 +309,29 @@ jobs:
             exit 0
           fi
 
-          kubectl apply -f - <<EOF
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: petclinic-platform-repo
-            namespace: ${ARGOCD_NAMESPACE}
-            labels:
-              argocd.argoproj.io/secret-type: repository
-          stringData:
-            type: git
-            url: ${GITOPS_REPO_URL}
-            username: x-access-token
-            password: ${ARGOCD_REPO_TOKEN}
-          EOF
+          if kubectl get secret petclinic-platform-repo --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
+            TYPE_B64="$(printf '%s' 'git' | base64 | tr -d '\n')"
+            URL_B64="$(printf '%s' "$GITOPS_REPO_URL" | base64 | tr -d '\n')"
+            USER_B64="$(printf '%s' 'x-access-token' | base64 | tr -d '\n')"
+            PASSWORD_B64="$(printf '%s' "$ARGOCD_REPO_TOKEN" | base64 | tr -d '\n')"
+
+            kubectl patch secret petclinic-platform-repo \
+              --namespace "$ARGOCD_NAMESPACE" \
+              --type merge \
+              -p "{\"metadata\":{\"labels\":{\"argocd.argoproj.io/secret-type\":\"repository\"}},\"data\":{\"type\":\"${TYPE_B64}\",\"url\":\"${URL_B64}\",\"username\":\"${USER_B64}\",\"password\":\"${PASSWORD_B64}\"}}"
+            exit 0
+          fi
+
+          kubectl create secret generic petclinic-platform-repo \
+            --namespace "$ARGOCD_NAMESPACE" \
+            --from-literal=type=git \
+            --from-literal=url="$GITOPS_REPO_URL" \
+            --from-literal=username=x-access-token \
+            --from-literal=password="$ARGOCD_REPO_TOKEN" \
+            --dry-run=client \
+            -o yaml \
+            | kubectl label --local -f - argocd.argoproj.io/secret-type=repository --overwrite -o yaml \
+            | kubectl apply -f -
 
       - name: Apply Argo CD application manifests
         shell: bash

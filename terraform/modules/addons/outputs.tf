@@ -43,6 +43,11 @@ output "prometheus_service_name" {
   value       = "${helm_release.monitoring.name}-kube-prometheus-prometheus"
 }
 
+output "zipkin_service_name" {
+  description = "Kubernetes service name for Zipkin"
+  value       = kubernetes_service_v1.zipkin.metadata[0].name
+}
+
 output "argocd_namespace" {
   description = "Namespace where Argo CD runs"
   value       = var.argocd_namespace

@@ -4,6 +4,7 @@ environment  = "dev"
 repository_prefix = "petclinic-dev"
 app_namespace = "petclinic"
 monitoring_grafana_service_type = "ClusterIP"
+monitoring_zipkin_service_type = "ClusterIP"
 argocd_server_service_type = "ClusterIP"
 node_instance_type = "t3.medium"
 node_desired_size = 3

@@ -62,7 +62,7 @@ spec:
             - name: http
               containerPort: {{ .Values.container.port }}
               protocol: TCP
-          {{- if or .Values.spring.profiles .Values.mysql.enabled .Values.openai.enabled .Values.env }}
+          {{- if or .Values.spring.profiles .Values.mysql.enabled .Values.openai.enabled .Values.tracing.enabled .Values.env }}
           env:
             {{- if .Values.spring.profiles }}
             - name: SPRING_PROFILES_ACTIVE
@@ -108,6 +108,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.openai.secretName }}
                   key: {{ .Values.openai.key }}
+            {{- end }}
+            {{- if .Values.tracing.enabled }}
+            - name: MANAGEMENT_TRACING_ENABLED
+              value: "true"
+            - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+              value: {{ .Values.tracing.samplingProbability | quote }}
+            - name: MANAGEMENT_ZIPKIN_TRACING_ENDPOINT
+              value: {{ .Values.tracing.zipkin.endpoint | quote }}
             {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}

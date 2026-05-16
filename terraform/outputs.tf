@@ -88,6 +88,11 @@ output "prometheus_service_name" {
   value       = module.addons.prometheus_service_name
 }
 
+output "zipkin_service_name" {
+  description = "Kubernetes service name for Zipkin"
+  value       = module.addons.zipkin_service_name
+}
+
 output "grafana_port_forward_command" {
   description = "Command to access Grafana locally after the monitoring stack is installed"
   value       = "kubectl port-forward svc/${module.addons.grafana_service_name} 3000:80 -n ${module.addons.monitoring_namespace}"
@@ -96,6 +101,11 @@ output "grafana_port_forward_command" {
 output "prometheus_port_forward_command" {
   description = "Command to access Prometheus locally after the monitoring stack is installed"
   value       = "kubectl port-forward svc/${module.addons.prometheus_service_name} 9090:9090 -n ${module.addons.monitoring_namespace}"
+}
+
+output "zipkin_port_forward_command" {
+  description = "Command to access Zipkin locally after the monitoring stack is installed"
+  value       = "kubectl port-forward svc/${module.addons.zipkin_service_name} 9411:9411 -n ${module.addons.monitoring_namespace}"
 }
 
 output "argocd_namespace" {

@@ -28,6 +28,11 @@ variable "monitoring_grafana_service_type" {
   type        = string
 }
 
+variable "monitoring_zipkin_service_type" {
+  description = "Kubernetes service type for Zipkin in the monitoring stack"
+  type        = string
+}
+
 variable "argocd_namespace" {
   description = "Namespace where Argo CD runs"
   type        = string
