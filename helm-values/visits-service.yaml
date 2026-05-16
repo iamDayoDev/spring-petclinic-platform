@@ -1,5 +1,5 @@
 image:
-  tag: "eeb63dd"
+  tag: "1fafa72"
 
 service:
   name: visits-service
