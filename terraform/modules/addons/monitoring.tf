@@ -137,5 +137,8 @@ resource "kubernetes_service_v1" "zipkin" {
     }
   }
 
-  depends_on = [kubernetes_deployment_v1.zipkin]
+  depends_on = [
+    kubernetes_deployment_v1.zipkin,
+    helm_release.aws_load_balancer_controller,
+  ]
 }

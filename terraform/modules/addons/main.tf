@@ -61,6 +61,7 @@ resource "helm_release" "aws_load_balancer_controller" {
       clusterName = var.cluster_name
       region      = var.aws_region
       vpcId       = var.vpc_id
+      enableServiceMutatorWebhook = false
       serviceAccount = {
         create = true
         name   = var.alb_service_account_name
