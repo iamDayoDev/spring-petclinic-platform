@@ -56,7 +56,6 @@ jobs:
           DEPLOY_ENVIRONMENT: ${{ github.event.client_payload.environment || '' }}
           SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repository || '' }}
           SOURCE_SHA: ${{ github.event.client_payload.source_sha || github.event.client_payload.sha || '' }}
-          ALLOW_MULTIPLE_SERVICES: ${{ github.event.client_payload.allow_multiple_services || '' }}
         run: |
           set -euo pipefail
 
@@ -73,19 +72,8 @@ jobs:
             exit 1
           fi
 
-          SERVICE_COUNT=0
-          for _ in ${SERVICE_LIST//,/ }; do
-            SERVICE_COUNT=$((SERVICE_COUNT + 1))
-          done
-
-          if [ "${SERVICE_COUNT}" -gt 1 ] && [ "${ALLOW_MULTIPLE_SERVICES}" != "true" ]; then
-            echo "Refusing to update multiple services from a single image event." >&2
-            echo "Received services: ${SERVICE_LIST}" >&2
-            echo "If this was intentional, dispatch with allow_multiple_services=true." >&2
-            exit 1
-          fi
-
           UPDATED_SERVICES=""
+          SKIPPED_SERVICES=""
           DEPLOY_MATRIX_ITEMS=()
           TARGETS=""
 
@@ -121,17 +109,6 @@ jobs:
               exit 1
             fi
 
-            echo "Updating ${values_file} to image tag ${IMAGE_TAG}"
-            sed -i -E "/^image:/,/^[^[:space:]]/ s|^([[:space:]]*tag:).*|\1 \"${IMAGE_TAG}\"|" "${values_file}"
-
-            if ! grep -Fq "  tag: \"${IMAGE_TAG}\"" "${values_file}"; then
-              echo "Failed to update image.tag in ${values_file}"
-              exit 1
-            fi
-
-            UPDATED_SERVICES="${UPDATED_SERVICES} ${SERVICE}"
-            DEPLOY_MATRIX_ITEMS+=("{\"service\":\"${SERVICE}\",\"environment\":\"${SERVICE_ENV}\"}")
-
             ENV_VALUES_FILE="helm-values/${SERVICE_ENV}.yaml"
 
             if [ ! -f "${ENV_VALUES_FILE}" ]; then
@@ -155,38 +132,6 @@ jobs:
               exit 1
             fi
 
-            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}:${REPOSITORY_PREFIX}"$'\n'
-          done
-
-          git diff -- helm-values/
-
-          DEPLOY_MATRIX="[$(IFS=,; echo "${DEPLOY_MATRIX_ITEMS[*]}")]"
-
-          {
-            echo "services=${UPDATED_SERVICES# }"
-            echo "image_tag=${IMAGE_TAG}"
-            echo "source_repository=${SOURCE_REPOSITORY}"
-            echo "source_sha=${SOURCE_SHA}"
-            echo "deploy_matrix=${DEPLOY_MATRIX}"
-            echo "targets<<EOF"
-            printf '%s' "${TARGETS}"
-            echo
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Wait for images in ECR
-        shell: bash
-        env:
-          IMAGE_TAG: ${{ steps.context.outputs.image_tag }}
-          TARGETS: ${{ steps.context.outputs.targets }}
-        run: |
-          set -euo pipefail
-
-          while IFS=: read -r SERVICE SERVICE_ENV REPOSITORY_PREFIX; do
-            if [ -z "${SERVICE:-}" ]; then
-              continue
-            fi
-
             REPOSITORY_NAME="${REPOSITORY_PREFIX}-${SERVICE}"
             echo "Waiting for ECR image ${REPOSITORY_NAME}:${IMAGE_TAG}"
 
@@ -204,10 +149,46 @@ jobs:
             done
 
             if [ "${FOUND}" != "true" ]; then
-              echo "ECR image not found after waiting: ${REPOSITORY_NAME}:${IMAGE_TAG}" >&2
+              echo "Skipping ${SERVICE}: image ${REPOSITORY_NAME}:${IMAGE_TAG} was not found in ECR."
+              SKIPPED_SERVICES="${SKIPPED_SERVICES} ${SERVICE}"
+              continue
+            fi
+
+            echo "Updating ${values_file} to image tag ${IMAGE_TAG}"
+            sed -i -E "/^image:/,/^[^[:space:]]/ s|^([[:space:]]*tag:).*|\1 \"${IMAGE_TAG}\"|" "${values_file}"
+
+            if ! grep -Fq "  tag: \"${IMAGE_TAG}\"" "${values_file}"; then
+              echo "Failed to update image.tag in ${values_file}"
               exit 1
             fi
-          done <<< "${TARGETS}"
+
+            UPDATED_SERVICES="${UPDATED_SERVICES} ${SERVICE}"
+            DEPLOY_MATRIX_ITEMS+=("{\"service\":\"${SERVICE}\",\"environment\":\"${SERVICE_ENV}\"}")
+            TARGETS="${TARGETS}${SERVICE}:${SERVICE_ENV}:${REPOSITORY_PREFIX}"$'\n'
+          done
+
+          if [ -z "${UPDATED_SERVICES# }" ]; then
+            echo "No service images with tag ${IMAGE_TAG} were found in ECR." >&2
+            echo "Received services: ${SERVICE_LIST}" >&2
+            exit 1
+          fi
+
+          git diff -- helm-values/
+
+          DEPLOY_MATRIX="[$(IFS=,; echo "${DEPLOY_MATRIX_ITEMS[*]}")]"
+
+          {
+            echo "services=${UPDATED_SERVICES# }"
+            echo "skipped_services=${SKIPPED_SERVICES# }"
+            echo "image_tag=${IMAGE_TAG}"
+            echo "source_repository=${SOURCE_REPOSITORY}"
+            echo "source_sha=${SOURCE_SHA}"
+            echo "deploy_matrix=${DEPLOY_MATRIX}"
+            echo "targets<<EOF"
+            printf '%s' "${TARGETS}"
+            echo
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Commit updated tag
         id: commit
