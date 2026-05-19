@@ -4,7 +4,7 @@ output "hosted_zone_id" {
 }
 
 output "certificate_arn" {
-  description = "Validated ACM certificate ARN for the application hostname"
+  description = "Validated ACM certificate ARN for the exposed hostnames"
   value       = aws_acm_certificate_validation.app.certificate_arn
 }
 

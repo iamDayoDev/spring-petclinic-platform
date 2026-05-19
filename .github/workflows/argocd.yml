@@ -265,19 +265,11 @@ jobs:
             exit 1
           fi
 
-          if kubectl get secret openai-secret --namespace "$APP_NAMESPACE" >/dev/null 2>&1; then
-            KEY_B64="$(printf '%s' "$OPENAI_API_KEY" | base64 | tr -d '\n')"
-
-            kubectl patch secret openai-secret \
-              --namespace "$APP_NAMESPACE" \
-              --type merge \
-              -p "{\"data\":{\"SPRING_AI_OPENAI_API_KEY\":\"${KEY_B64}\"}}"
-            exit 0
-          fi
-
           kubectl create secret generic openai-secret \
             --namespace "$APP_NAMESPACE" \
-            --from-literal=SPRING_AI_OPENAI_API_KEY="$OPENAI_API_KEY"
+            --from-literal=SPRING_AI_OPENAI_API_KEY="$OPENAI_API_KEY" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
 
       - name: Ensure Argo CD control plane exists
         id: install

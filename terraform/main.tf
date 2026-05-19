@@ -13,8 +13,9 @@ locals {
 module "route53" {
   source = "./modules/route53"
 
-  domain           = var.domain
-  hosted_zone_name = var.hosted_zone_name
+  domain                  = var.domain
+  certificate_domain_name = var.certificate_domain_name
+  hosted_zone_name        = var.hosted_zone_name
 }
 
 module "vpc" {
@@ -76,6 +77,11 @@ module "addons" {
   external_dns_service_account_name = local.external_dns_service_account_name
   external_dns_role_arn     = module.iam.external_dns_role_arn
   hosted_zone_name          = var.hosted_zone_name
+  certificate_arn           = module.route53.certificate_arn
+  argocd_hostname           = var.argocd_hostname
+  grafana_hostname          = var.grafana_hostname
+  prometheus_hostname       = var.prometheus_hostname
+  zipkin_hostname           = var.zipkin_hostname
   cluster_name              = module.eks.cluster_name
 
   depends_on = [module.eks, module.iam, module.route53]

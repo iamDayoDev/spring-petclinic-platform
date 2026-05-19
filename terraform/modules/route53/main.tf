@@ -4,7 +4,7 @@ data "aws_route53_zone" "app" {
 }
 
 resource "aws_acm_certificate" "app" {
-  domain_name       = var.domain
+  domain_name       = var.certificate_domain_name != null ? var.certificate_domain_name : var.domain
   validation_method = "DNS"
 
   lifecycle {

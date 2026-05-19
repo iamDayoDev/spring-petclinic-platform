@@ -14,6 +14,12 @@ resource "helm_release" "monitoring" {
         service = {
           type = var.monitoring_grafana_service_type
         }
+        "grafana.ini" = {
+          server = {
+            domain   = var.grafana_hostname
+            root_url = "https://${var.grafana_hostname}"
+          }
+        }
         additionalDataSources = [
           {
             name   = "Zipkin"
@@ -25,6 +31,7 @@ resource "helm_release" "monitoring" {
       }
       prometheus = {
         prometheusSpec = {
+          externalUrl = "https://${var.prometheus_hostname}"
           podMonitorNamespaceSelector = {
             matchNames = [
               var.app_namespace,

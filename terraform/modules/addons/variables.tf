@@ -97,3 +97,28 @@ variable "hosted_zone_name" {
   description = "Public Route 53 hosted zone name managed by ExternalDNS"
   type        = string
 }
+
+variable "certificate_arn" {
+  description = "ACM certificate ARN shared by the public ingresses"
+  type        = string
+}
+
+variable "argocd_hostname" {
+  description = "Hostname to expose Argo CD"
+  type        = string
+}
+
+variable "grafana_hostname" {
+  description = "Hostname to expose Grafana"
+  type        = string
+}
+
+variable "prometheus_hostname" {
+  description = "Hostname to expose Prometheus"
+  type        = string
+}
+
+variable "zipkin_hostname" {
+  description = "Hostname to expose Zipkin"
+  type        = string
+}

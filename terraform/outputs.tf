@@ -148,14 +148,29 @@ output "app_domain" {
   value       = var.domain
 }
 
+output "admin_hostnames" {
+  description = "Public hostnames exposed for the admin and observability tools"
+  value = {
+    argocd     = var.argocd_hostname
+    grafana    = var.grafana_hostname
+    prometheus = var.prometheus_hostname
+    zipkin     = var.zipkin_hostname
+  }
+}
+
 output "route53_zone_id" {
   description = "Route 53 public hosted zone ID used for the application domain"
   value       = module.route53.hosted_zone_id
 }
 
 output "app_certificate_arn" {
-  description = "ACM certificate ARN managed for the application domain"
+  description = "ACM certificate ARN managed for the exposed app and admin hostnames"
   value       = module.route53.certificate_arn
+}
+
+output "admin_ingress_group_name" {
+  description = "AWS Load Balancer Controller ingress group name shared by the admin tools"
+  value       = module.addons.admin_ingress_group_name
 }
 
 output "external_dns_role_name" {
