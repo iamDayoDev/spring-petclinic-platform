@@ -54,8 +54,29 @@ variable "domain" {
   description = "Domain name for the application"
   type        = string
 }
+variable "certificate_domain_name" {
+  description = "Primary ACM certificate name. Use a wildcard to cover app and admin subdomains."
+  type        = string
+  default     = null
+}
 variable "hosted_zone_name" {
   description = "Public Route 53 hosted zone name that should own the application domain"
+  type        = string
+}
+variable "argocd_hostname" {
+  description = "Hostname to expose Argo CD through ALB and ExternalDNS"
+  type        = string
+}
+variable "grafana_hostname" {
+  description = "Hostname to expose Grafana through ALB and ExternalDNS"
+  type        = string
+}
+variable "prometheus_hostname" {
+  description = "Hostname to expose Prometheus through ALB and ExternalDNS"
+  type        = string
+}
+variable "zipkin_hostname" {
+  description = "Hostname to expose Zipkin through ALB and ExternalDNS"
   type        = string
 }
 variable "eso_role_name" {

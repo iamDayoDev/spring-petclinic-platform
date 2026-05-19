@@ -10,6 +10,11 @@ resource "helm_release" "argocd" {
   values = [
     file("${path.module}/values/argocd.yaml"),
     yamlencode({
+      configs = {
+        cm = {
+          url = "https://${var.argocd_hostname}"
+        }
+      }
       server = {
         service = {
           type = var.argocd_server_service_type

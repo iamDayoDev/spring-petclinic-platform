@@ -62,3 +62,8 @@ output "argocd_server_service_name" {
   description = "Kubernetes service name for the Argo CD API server"
   value       = "${helm_release.argocd.name}-server"
 }
+
+output "admin_ingress_group_name" {
+  description = "AWS Load Balancer Controller ingress group name shared by admin tools"
+  value       = local.admin_ingress_group_name
+}

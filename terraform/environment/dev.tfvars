@@ -12,7 +12,12 @@ node_min_size = 2
 node_max_size = 5
 
 domain = "petclinic.dayoclouddev.site"
+certificate_domain_name = "*.dayoclouddev.site"
 hosted_zone_name = "dayoclouddev.site"
+argocd_hostname = "argocd.dayoclouddev.site"
+grafana_hostname = "grafana.dayoclouddev.site"
+prometheus_hostname = "prometheus.dayoclouddev.site"
+zipkin_hostname = "zipkin.dayoclouddev.site"
 eso_role_name  = "petclinic-eso-role"
 alb_role_name  = "petclinic-alb-role"
 alb_policy_name = "AWSLoadBalancerControllerIAMPolicy"
