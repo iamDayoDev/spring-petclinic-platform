@@ -1,5 +1,5 @@
 image:
-  tag: "8a4e8e4"
+  tag: "bdb1423"
 
 service:
   name: vets-service
