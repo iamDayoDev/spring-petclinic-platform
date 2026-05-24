@@ -1,5 +1,5 @@
 image:
-  tag: "a99d4d6"
+  tag: "8a4e8e4"
 
 service:
   name: api-gateway
